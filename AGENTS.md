@@ -1,0 +1,23 @@
+# Agent instructions
+
+- Read `README.md` before changing this repository.
+- Check the Git branch and working tree before editing. Preserve existing work.
+- Keep the package selection in `package-names.nix`.
+- Keep `flake.lock` authoritative for this repository's package versions.
+- Support `aarch64-darwin`, `x86_64-linux`, and `aarch64-linux`.
+- Keep the default package output a single CLI bundle.
+- Keep the Home Manager adapter limited to `home.packages`.
+- Keep the NixOS adapter limited to `environment.systemPackages`.
+- Build adapters from this repository's package set. Do not use caller versions.
+- Do not add a `nixpkgs.follows` dependency override.
+- Do not add personal configuration, host identity, credentials, or secrets.
+- Do not add language runtimes or developer package managers. mise owns them.
+- Do not add fonts or font inputs. Never add Berkeley Mono assets to Git.
+- Do not copy Git history or unreviewed assets from reference repositories.
+- Run `bash scripts/check.sh` after changes.
+- Use `just check` and `just build` when `just` is available.
+- Require native verification on all supported platforms before promotion.
+- Keep documentation and checks aligned with the public outputs.
+- Do not create release workflows unless the user requests one.
+- Ask before public writes unless the user authorized their action and scope.
+- Do not add `Co-Authored-By` lines to commits.
