@@ -18,6 +18,19 @@
 - Use `just check` and `just build` when `just` is available.
 - Require native verification on all supported platforms before promotion.
 - Keep documentation and checks aligned with the public outputs.
-- Do not create release workflows unless the user requests one.
+- Read `docs/release.md` before release work.
+- Use `create-release-process` to maintain the release workflow.
+- Use `cut-release` and `release-runner` with the repo-local runner for releases.
+- Keep `release.toml`, release helpers, checks, and release docs aligned.
+- Keep vendored `scripts/release.py` unchanged. Put policy in TOML and helpers.
+- Use `uv run scripts/release.py check --json` and `plan --json` for preparation.
+- Use guarded `run --dry-run` before an authorized `run --apply`.
+- Do not reconstruct tag, push, or GitHub release commands by hand.
+- Use `YYYY.MM.DD.XX` without a prefix. Start at `.00` in `America/Phoenix`.
+- Require clean, current `main` and successful native CI before publication.
+- Keep the same release gate for dry runs and resume. Do not bypass failed checks.
+- Use Python 3.11 or later for release tooling. uv is owned by mise or the native manager.
+- Keep CI limited to the base source audit, packages, flake, and adapter contracts.
+- Run release-tool tests locally through `release.toml`. Do not add them to CI.
 - Ask before public writes unless the user authorized their action and scope.
 - Do not add `Co-Authored-By` lines to commits.

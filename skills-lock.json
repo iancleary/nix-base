@@ -1,0 +1,23 @@
+{
+  "version": 1,
+  "skills": {
+    "create-release-process": {
+      "source": "iancleary/release-skills",
+      "sourceType": "github",
+      "skillPath": "skills/create-release-process/SKILL.md",
+      "computedHash": "2f897048d3c9ec6632af5d8ac7899728d2469db50f0e2c623ceace676a9fac65"
+    },
+    "cut-release": {
+      "source": "iancleary/release-skills",
+      "sourceType": "github",
+      "skillPath": "skills/cut-release/SKILL.md",
+      "computedHash": "4fbf3c86a0617c6816f49d67cc2135dd1903e79b3df697cf799a9c1e791b6e8b"
+    },
+    "release-runner": {
+      "source": "iancleary/release-skills",
+      "sourceType": "github",
+      "skillPath": "skills/release-runner/SKILL.md",
+      "computedHash": "ad36d38e9c6284631a600b616f7519f8eca07f8de7bf93ca03493c6d0cf41e93"
+    }
+  }
+}
