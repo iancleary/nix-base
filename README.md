@@ -111,27 +111,23 @@ This repository does not migrate machines or replace existing configurations.
 
 ## Development
 
-Required tools are Nix with flakes enabled and Python 3.11 or later. `just`
-is optional and can be installed through mise. uv remains a mise or native
-package manager tool; it is not part of the stable bundle.
+Required tools are Nix with flakes enabled and Python 3.9 or later. `just`
+is optional and can be installed through mise.
 
 ```sh
 bash scripts/check.sh
 nix build .
 ```
 
-Equivalent wrappers are `just check` and `just build`. If the system Python
-is older, run the checks with:
-
-```sh
-uv run --python 3.11 -- bash scripts/check.sh
-```
+Equivalent wrappers are `just check` and `just build`.
 
 The check script audits tracked working files and staged blobs for font assets
 and extra dependencies. Stage new files before running it. It then
 runs `nix flake check --no-write-lock-file --all-systems --no-build` to evaluate
 all supported systems. A separate build selects the local system's checks.
-CI builds and checks the three supported platforms on native runners.
+CI checks only the base source audit, packages, flake, and adapter contracts
+on the three native platforms. Release-tool tests run locally through
+`release.toml`.
 
 Checks cover the bundle, executable smoke tests, ownership rules, and the
 minimal adapter contracts. Keep these checks aligned with the public outputs.
@@ -142,7 +138,8 @@ Releases use `YYYY.MM.DD.XX`, starting with `.00` each day in
 `America/Phoenix`. They tag a verified commit and publish GitHub notes. They do
 not change the package selection, lockfile, or a version file.
 
-Use the repo-local runner. See [the release process](docs/release.md) for checks,
+Release tooling needs Python 3.11 or later and uv from mise or a native
+package manager. Use the repo-local runner. See [the release process](docs/release.md) for checks,
 guarded dry runs, publication, and recovery.
 
 ## License

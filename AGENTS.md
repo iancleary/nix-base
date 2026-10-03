@@ -29,6 +29,8 @@
 - Use `YYYY.MM.DD.XX` without a prefix. Start at `.00` in `America/Phoenix`.
 - Require clean, current `main` and successful native CI before publication.
 - Keep the same release gate for dry runs and resume. Do not bypass failed checks.
-- Use Python 3.11 or later. uv is owned by mise or the native package manager.
+- Use Python 3.11 or later for release tooling. uv is owned by mise or the native manager.
+- Keep CI limited to the base source audit, packages, flake, and adapter contracts.
+- Run release-tool tests locally through `release.toml`. Do not add them to CI.
 - Ask before public writes unless the user authorized their action and scope.
 - Do not add `Co-Authored-By` lines to commits.

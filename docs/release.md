@@ -38,16 +38,18 @@ The release runner requires all of these conditions:
 - All `origin` fetch and push URLs identify `iancleary/nix-base`.
 - GitHub CLI publication resolves to the same public repository.
 - Local `HEAD` is exactly the current remote `main` commit.
-- `bash scripts/check.sh` passes.
+- `bash scripts/check.sh` passes for the Nix base.
+- Local release-tool regression tests pass.
 - The latest `check.yml` push run for that `main` commit succeeds.
 - The run includes successful `check (aarch64-darwin)`,
   `check (x86_64-linux)`, and `check (aarch64-linux)` native jobs.
 
-`scripts/check_release_ci.py` verifies remote and CI state. CI selects Python
-3.11 for local checks. If the workstation's system Python is older, use:
+`scripts/check_release_ci.py` verifies remote and CI state. CI checks only
+the Nix base. It does not run release-tool tests or release commands.
+`release.toml` runs release-tool regressions locally. To run those tests alone:
 
 ```sh
-uv run --python 3.11 -- bash scripts/check.sh
+uv run --python 3.11 -- python -B -m unittest discover -s tests -p 'test_release_*.py'
 ```
 
 Dry runs and resume enforce the same release gate. A failed or missing check
