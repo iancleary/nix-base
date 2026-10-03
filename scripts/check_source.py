@@ -2,12 +2,18 @@
 """Audit the exact tracked source before building or publishing."""
 
 import json
+import re
 import subprocess
 import sys
 from pathlib import Path
 
 FONT_SUFFIXES = {".ttf", ".otf", ".ttc", ".otc", ".woff", ".woff2", ".eot", ".dfont", ".bdf", ".pcf"}
 FONT_SIGNATURES = (b"\x00\x01\x00\x00", b"OTTO", b"ttcf", b"wOFF", b"wOF2")
+FLAKEHUB_NIXPKGS_URL = "https://flakehub.com/f/NixOS/nixpkgs/0.2605"
+FLAKEHUB_PINNED_NIXPKGS_RE = re.compile(
+    r"https://api\.flakehub\.com/f/pinned/NixOS/nixpkgs/0\.2605\.[0-9]+%2Brev-"
+    r"([0-9a-f]{40})/[0-9a-f-]{36}/source\.tar\.gz"
+)
 
 
 def audit(root: Path) -> list[str]:
@@ -49,10 +55,15 @@ def audit(root: Path) -> list[str]:
             errors.append("only root and official nixpkgs may appear in the lock graph")
         if nodes.get("root", {}).get("inputs") != {"nixpkgs": "nixpkgs"}:
             errors.append("nixpkgs must be the only root dependency")
-        for field in ("original", "locked"):
-            source = nodes.get("nixpkgs", {}).get(field, {})
-            if (source.get("type"), source.get("owner"), source.get("repo")) != ("github", "NixOS", "nixpkgs"):
-                errors.append(f"{field} dependency must be public NixOS/nixpkgs")
+        nixpkgs = nodes.get("nixpkgs", {})
+        original = nixpkgs.get("original", {})
+        if (original.get("type"), original.get("url")) != ("tarball", FLAKEHUB_NIXPKGS_URL):
+            errors.append("original dependency must be public NixOS/nixpkgs 26.05 from FlakeHub")
+        locked = nixpkgs.get("locked", {})
+        match = FLAKEHUB_PINNED_NIXPKGS_RE.fullmatch(locked.get("url", ""))
+        if (locked.get("type") != "tarball" or match is None
+                or match.group(1) != locked.get("rev")):
+            errors.append("locked dependency must be the matching public NixOS/nixpkgs 26.05 FlakeHub source")
     return sorted(set(errors))
 
 

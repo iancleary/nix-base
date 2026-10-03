@@ -1,7 +1,7 @@
 {
   description = "A small, reproducible CLI foundation for macOS and Linux";
 
-  inputs.nixpkgs.url = "github:NixOS/nixpkgs/nixos-26.05";
+  inputs.nixpkgs.url = "https://flakehub.com/f/NixOS/nixpkgs/0.2605";
 
   outputs = { self, nixpkgs }:
     let

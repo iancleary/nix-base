@@ -11,6 +11,8 @@ spec = importlib.util.spec_from_file_location(
 check_source = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(check_source)
 
+NIXPKGS_REV = "a" * 40
+
 
 class SourceAuditTests(unittest.TestCase):
     def setUp(self):
@@ -22,8 +24,17 @@ class SourceAuditTests(unittest.TestCase):
             "nodes": {
                 "root": {"inputs": {"nixpkgs": "nixpkgs"}},
                 "nixpkgs": {
-                    field: {"type": "github", "owner": "NixOS", "repo": "nixpkgs"}
-                    for field in ("original", "locked")
+                    "original": {
+                        "type": "tarball",
+                        "url": check_source.FLAKEHUB_NIXPKGS_URL,
+                    },
+                    "locked": {
+                        "type": "tarball",
+                        "url": "https://api.flakehub.com/f/pinned/NixOS/nixpkgs/"
+                               f"0.2605.1%2Brev-{NIXPKGS_REV}/"
+                               "00000000-0000-0000-0000-000000000000/source.tar.gz",
+                        "rev": NIXPKGS_REV,
+                    },
                 },
             }
         }
@@ -77,7 +88,12 @@ class SourceAuditTests(unittest.TestCase):
         self.write_lock()
         self.assertTrue(any("lock graph" in error for error in check_source.audit(self.root)))
 
-    def test_nixpkgs_from_another_owner_fails(self):
-        self.lock["nodes"]["nixpkgs"]["locked"]["owner"] = "another-owner"
+    def test_nixpkgs_from_an_unapproved_flakehub_source_fails(self):
+        self.lock["nodes"]["nixpkgs"]["locked"]["url"] = (
+            "https://api.flakehub.com/f/pinned/another-owner/nixpkgs/"
+            f"0.2605.1%2Brev-{NIXPKGS_REV}/"
+            "00000000-0000-0000-0000-000000000000/source.tar.gz"
+        )
         self.write_lock()
-        self.assertTrue(any("public NixOS/nixpkgs" in error for error in check_source.audit(self.root)))
+        self.assertTrue(any("matching public NixOS/nixpkgs 26.05" in error
+                            for error in check_source.audit(self.root)))
