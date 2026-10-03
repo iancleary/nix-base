@@ -1,0 +1,26 @@
+# Release workflow: https://github.com/iancleary/release-skills
+[release]
+runner_protocol = "prepared-v1"
+name = "nix-base"
+runner = [
+  "uv", "run", "--script", "scripts/release.py", "tag-release",
+  "--provider", "github",
+  "--tag-prefix", "",
+  "--branch", "main",
+]
+dry_run_args = ["--dry-run"]
+current_version_command = ["uv", "run", "--script", "scripts/cut_release.py", "--print-current-version"]
+next_version_command = ["uv", "run", "--script", "scripts/cut_release.py", "--print-next-version"]
+validate_version_command = ["uv", "run", "--script", "scripts/cut_release.py", "--validate-version"]
+publish = true
+
+[checks]
+commands = [
+  ["bash", "scripts/check.sh"],
+  ["python3", "scripts/check_release_ci.py"],
+]
+
+[runner_source]
+repository = "https://github.com/iancleary/release-skills"
+revision = "1357ca075b4c214cccf798a910f7348e238acd51"
+sha256 = "10869f02fe8a1190e75cc3e70eef85012e89dba52b89d865f79a6a9fb317139e"

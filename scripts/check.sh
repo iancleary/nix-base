@@ -3,6 +3,7 @@ set -euo pipefail
 
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$repo_root"
+python3 -c 'import sys; sys.exit("Python 3.11+ required; use uv run --python 3.11 -- bash scripts/check.sh") if sys.version_info < (3, 11) else None'
 python3 scripts/check_source.py
 python3 -B -m unittest discover -s tests -p 'test_*.py'
 bash -n scripts/check.sh tests/smoke.sh
