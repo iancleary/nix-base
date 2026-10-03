@@ -96,6 +96,9 @@ Package updates require a reviewed `flake.lock` change. Package selection
 changes require a reviewed `package-names.nix` change. Build and check an update
 on all supported platforms before promoting it.
 
+The flake uses FlakeHub's public `NixOS/nixpkgs/0.2605` stream. The lockfile
+records the exact Nixpkgs revision selected from that stream.
+
 Consumers update their pinned base commit explicitly. A dotfiles pull does not
 update this bundle. A mise installation does not update this bundle.
 
