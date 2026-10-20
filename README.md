@@ -135,6 +135,23 @@ on the three native platforms. Release-tool tests run locally through
 Checks cover the bundle, executable smoke tests, ownership rules, and the
 minimal adapter contracts. Keep these checks aligned with the public outputs.
 
+### CI network retries
+
+[The native CI workflow](.github/workflows/check.yml) configures Nix's built-in
+download retries through the installer action's `extra-conf`. Transient fetch
+and binary-cache download failures get up to 10 attempts per download, with
+Nix's backoff between attempts. Connections time out after 15 seconds; downloads
+with no progress time out after 60 seconds so Nix can retry instead of hanging.
+See [Nix's configuration reference](https://nix.dev/manual/nix/stable/command-ref/conf-file.html#conf-download-attempts).
+
+Retries apply to Nix downloads, not the entire check script. Source audit,
+evaluation, build, and smoke-test errors still fail CI. These settings take
+effect after Nix installation; they do not control checkout, action downloads,
+or the installer itself. Persistent network failures still fail after the
+retry budget or the job's 30-minute timeout. If retries are exhausted, inspect
+the failed URL and HTTP or connection error in the job log before rerunning;
+do not change `flake.lock` or bypass checks to work around an outage.
+
 ## Releases
 
 Releases use `YYYY.MM.DD.XX`, starting with `.00` each day in
