@@ -1,2 +1,7 @@
 #!/usr/bin/env bash
+# Windows PowerShell launcher for WSL.
+if [[ ! -x /mnt/c/Windows/System32/WindowsPowerShell/v1.0/powershell.exe ]]; then
+  printf 'powershell.exe requires Windows PowerShell through WSL (/mnt/c).\n' >&2
+  exit 127
+fi
 exec /mnt/c/Windows/System32/WindowsPowerShell/v1.0/powershell.exe "$@"
