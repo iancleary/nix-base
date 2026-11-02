@@ -1,0 +1,47 @@
+#!/usr/bin/env bash
+set -euo pipefail
+# Resolve installed symlinks before locating the bundled maintenance procedure.
+source_path=${BASH_SOURCE[0]}
+while [[ -L "$source_path" ]]; do
+    source_dir=$(cd -- "$(dirname -- "$source_path")" && pwd)
+    source_path=$(readlink "$source_path")
+    [[ "$source_path" == /* ]] || source_path="$source_dir/$source_path"
+done
+libexec_dir=$(cd -- "$(dirname -- "$source_path")/../libexec" && pwd)
+
+run_maintenance() {
+    env MISE_AUTO_INSTALL=0 UV_PYTHON_DOWNLOADS=never \
+        uv run --offline --no-project --managed-python --python '>=3.11' \
+        python "$libexec_dir/moshi-maintenance.py" "$@"
+}
+
+# No arguments follow the moshi-upgrade recipe: upgrade, turn usage
+# collection off, then restart once.
+usage() {
+    printf 'usage: moshi-upgrade [upgrade|restart|set usage-collection off]\n' >&2
+    exit 2
+}
+
+case $# in
+    0)
+        run_maintenance upgrade
+        run_maintenance set-usage-collection-off
+        run_maintenance restart
+        ;;
+    1)
+        case "$1" in
+            upgrade | restart) run_maintenance "$1" ;;
+            *) usage ;;
+        esac
+        ;;
+    3)
+        if [[ "$1" == set && "$2" == usage-collection && "$3" == off ]]; then
+            run_maintenance set-usage-collection-off
+        else
+            usage
+        fi
+        ;;
+    *)
+        usage
+        ;;
+esac

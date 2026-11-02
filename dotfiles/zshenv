@@ -1,0 +1,32 @@
+# Keep login-shell setup quiet and fast. Stable CLIs come from nix-base;
+# language runtimes and developer package managers come from mise.
+typeset -U path PATH
+
+# Non-interactive zsh reads this file. Homebrew mosh-server and tmux are
+# reached from the prefix below. mise shims are also placed on PATH for other
+# commands; mosh and tmux are not mise packages.
+if [[ -d /opt/homebrew/bin ]]; then
+  path=(/opt/homebrew/bin /opt/homebrew/sbin $path)
+elif [[ -x /usr/local/bin/brew ]]; then
+  path=(/usr/local/bin /usr/local/sbin $path)
+fi
+if [[ -d /run/current-system/sw/bin ]]; then
+  path=(/run/current-system/sw/bin $path)
+fi
+if [[ -d "$HOME/.local/state/nix/profiles/profile/bin" ]]; then
+  path=("$HOME/.local/state/nix/profiles/profile/bin" $path)
+elif [[ -d "$HOME/.nix-profile/bin" ]]; then
+  path=("$HOME/.nix-profile/bin" $path)
+fi
+# Static shims also expose the selected runtimes to noninteractive SSH commands.
+# Explicit upstream application installs retain precedence over old shims.
+path=("$HOME/.local/bin" "${MISE_DATA_DIR:-${XDG_DATA_HOME:-$HOME/.local/share}/mise}/shims" "$HOME/.cargo/bin" "$HOME/go/bin" "$HOME/.local/share/npm/bin" $path)
+
+export NPM_CONFIG_PREFIX="${NPM_CONFIG_PREFIX:-$HOME/.local/share/npm}"
+export DELTA_FEATURES="${DELTA_FEATURES:-+side-by-side}"
+
+[[ ! -r "$HOME/.cargo/env" ]] || source "$HOME/.cargo/env" >/dev/null 2>&1
+[[ ! -r "$HOME/.config/dotfiles/local.zshenv" ]] || source "$HOME/.config/dotfiles/local.zshenv"
+# bootstrap.sh owns login.sh. It puts mise shims on PATH for every zsh, including
+# noninteractive login shells, and activates mise once.
+[[ ! -r "$HOME/.config/dotfiles/login.sh" ]] || source "$HOME/.config/dotfiles/login.sh"

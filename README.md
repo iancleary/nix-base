@@ -1,10 +1,16 @@
 # nix-base
 
-A small, reproducible CLI foundation for macOS and Linux.
+A small, reproducible CLI foundation and slow-moving home configuration for
+macOS and Linux.
 
 This repository owns a shared package selection and its `flake.lock`. It exports
-one package bundle. Workstations can install the bundle directly. Home Manager
-and NixOS can install the same bundle through minimal adapters.
+one package bundle: the selected command-line tools, a set of tracked host
+executables, and slow-moving home configuration files. Workstations can install
+the bundle directly. Home Manager and NixOS can install the same bundle through
+minimal adapters. The dotfiles checkout owns the fast-moving and personal
+parts: the git account table, per-account gitconfigs, `$HOME/.config` hooks,
+and host-only settings, plus the deployment that links the bundle's files into
+`$HOME`.
 
 ## Package selection
 
@@ -25,21 +31,61 @@ developer package managers, language runtimes, and fast-moving tools in mise.
 | `x86_64-linux` | Linux development machines |
 | `aarch64-linux` | ARM64 Linux machines, including DGX Spark |
 
-The bundle includes executables, manual pages, and shell completions. It does
-not configure shell startup or activate completions. Dotfiles own that work.
+The bundle includes executables, manual pages, shell completions, tracked host
+executables, and the home configuration described below. Dotfiles own the
+activation of completions and the deployment of the configuration files.
+
+## Bundle contents
+
+The default package is one `buildEnv` containing:
+
+- `bin/`: the tools from `package-names.nix`, plus the tracked executables
+  from this repository:
+  - `git-targets`: the git account tool. It reads an account table
+    (`key`, `directory`, `host`, `username`, `email`, `login`, `gitconfig`,
+    `credential`, `tool`) from `$GIT_TARGETS_TABLE` or
+    `$XDG_CONFIG_HOME/git-targets/targets.tsv`, and resolves the gitconfig
+    files named by the table relative to the table's own directory. It provides
+    `list`, `clone`, `login`, `status`, and `migrate`. Invoked as `clone`, it
+    keeps the historical `clone <key> <repo>` form. The table and the
+    gitconfigs live in the dotfiles checkout, which deploys the table to
+    `~/.config/git-targets/targets.tsv`.
+  - `moshi-status`, `moshi-upgrade`, `moshi-upgrade-preview`, and
+    `moshi-maintenance`: the Moshi maintenance interface backed by
+    `libexec/moshi-maintenance.py`. The procedure defaults to the upstream
+    `rjyo/moshi` tap and `moshi-hook` formula; set `MOSHI_BREWFILE` to read
+    them from a marked Brewfile instead.
+  - `code` (macOS and Windows-VS-Code-under-WSL), `vivado` and
+    `powershell.exe` (WSL): host launchers with environment-variable overrides
+    (`MACOS_VSCODE_LAUNCHER`, `WSL_VSCODE_LAUNCHER`, `VIVADO_LAUNCHER`).
+    `code.exe`, `powershell`, and `vivado.exe` alias the same scripts.
+- `libexec/`: support programs used by the `bin/` executables.
+- `share/nix-base/`: the home configuration files:
+  - `zshenv`: login and non-interactive Zsh environment. It sources
+    `$HOME/.config/dotfiles/local.zshenv` and `login.sh`, which dotfiles owns.
+  - `zshrc`: interactive Zsh configuration. It sources
+    `$HOME/.config/dotfiles/local.zsh`, which dotfiles owns. It does not source
+    the dotfiles-owned `$HOME/.config/shell` helpers; the dotfiles checkout's
+    own startup wrapper adds them.
+  - `p10k.zsh`: the Powerlevel10k prompt configuration deployed as
+    `~/.p10k.zsh`.
+
+These files carry no identity, table, or secret content. The dotfiles checkout
+links them into `$HOME` from the installed profile path, for example
+`~/.local/state/nix/profiles/profile/share/nix-base/zshrc`.
 
 ## Ownership
 
 | Repository or tool | Responsibility |
 | --- | --- |
-| `nix-base` | Stable CLI packages and their dependency lock |
-| `dotfiles` | Editable shell, Git, terminal, and editor configuration |
+| `nix-base` | Stable CLI packages and their dependency lock; slow-moving home configuration and host launchers; the generic git account tool |
+| `dotfiles` | Editable shell, Git, terminal, and editor configuration; the git account table and per-account gitconfigs; deployment into `$HOME` |
 | mise | Developer package managers, runtimes, and frequently updated tools |
 | Native package manager | OS packages, desktop applications, and services |
 | `nix-fleet` | NixOS appliances, host services, and fleet operations |
 
-This repository contains no fonts, font inputs, personal configuration,
-credentials, machine identities, or GPU drivers. Berkeley Mono is private and
+This repository contains no fonts, font inputs, git account tables, per-account
+gitconfigs, credentials, host identities, or secrets. Berkeley Mono is private and
 must remain outside this repository and its Git history.
 
 ## Install the bundle
@@ -60,8 +106,9 @@ Choose a reviewed commit. Replace `<commit>` below with its full Git commit ID:
 nix profile add 'github:iancleary/nix-base?rev=<commit>'
 ```
 
-Dotfiles must expose the Nix user profile on `PATH`. This repository does not
-change shell startup files or install Nix.
+The dotfiles checkout exposes the Nix user profile on `PATH` and links the
+bundle's home configuration into `$HOME`. This repository does not install
+itself into `$HOME`.
 
 ## Home Manager and NixOS
 

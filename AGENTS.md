@@ -5,12 +5,19 @@
 - Keep the package selection in `package-names.nix`.
 - Keep `flake.lock` authoritative for this repository's package versions.
 - Support `aarch64-darwin`, `x86_64-linux`, and `aarch64-linux`.
-- Keep the default package output a single CLI bundle.
+- Keep the default package output a single CLI bundle. The bundle carries the
+  package `bin/`, the tracked executables in `bin/`, the Moshi procedure in
+  `libexec/`, and the home configuration under `share/nix-base/`.
 - Keep the Home Manager adapter limited to `home.packages`.
 - Keep the NixOS adapter limited to `environment.systemPackages`.
 - Build adapters from this repository's package set. Do not use caller versions.
 - Do not add a `nixpkgs.follows` dependency override.
-- Do not add personal configuration, host identity, credentials, or secrets.
+- Keep the git account table, per-account gitconfigs, credentials, host
+  identity, and secrets in the dotfiles checkout. `bin/git-targets` reads them
+  from a table outside this repository; never embed one here.
+- Keep fast-moving shell configuration in the dotfiles checkout. This
+  repository owns the slow-moving startup files, prompt config, and host
+  launchers; `$HOME/.config` hooks and host-only settings stay in dotfiles.
 - Do not add language runtimes or developer package managers. mise owns them.
 - Do not add fonts or font inputs. Never add Berkeley Mono assets to Git.
 - Do not copy Git history or unreviewed assets from reference repositories.

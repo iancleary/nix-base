@@ -1,0 +1,88 @@
+# Interactive Zsh configuration. Keep host-only settings in local.zsh.
+# Dotfiles-owned interactive helpers live in $HOME/.config/shell and are
+# sourced by the dotfiles checkout's own Zsh startup wrapper.
+[[ -o interactive ]] || return
+
+# Load Powerlevel10k instant prompt before the remaining interactive setup.
+if [[ -r "${XDG_CACHE_HOME:-$HOME/.cache}/p10k-instant-prompt-${(%):-%n}.zsh" ]]; then
+  source "${XDG_CACHE_HOME:-$HOME/.cache}/p10k-instant-prompt-${(%):-%n}.zsh"
+fi
+
+# Add Docker completions before initializing the completion system once.
+if [[ "$OSTYPE" == darwin* && -d "$HOME/.docker" ]]; then
+  fpath=("$HOME/.docker/completions" $fpath)
+fi
+
+autoload -Uz compinit
+compinit
+
+# Keep mise's per-prompt status messages compatible with instant prompt.
+if (( $+commands[mise] )) && [[ -z ${DOTFILES_MISE_ACTIVATED:-} ]]; then
+  eval "$(mise activate zsh --quiet)"
+fi
+
+# These commands come from nix-base or mise. Bootstrap does not install Nix.
+# A host without the command keeps the system ls, cat, and grep.
+if (( $+commands[bat] )); then
+  alias cat='bat'
+fi
+if (( $+commands[git] )); then
+  alias g='git'
+  alias gpoc='git push origin HEAD'
+fi
+if (( $+commands[rg] )); then
+  alias grep='rg'
+fi
+if (( $+commands[just] )); then
+  alias j='just'
+fi
+if (( $+commands[eza] )); then
+  alias l='eza -alh --icons=auto'
+  alias la='eza -la --icons=auto'
+  alias ll='eza -l --icons=auto'
+  alias ls='eza --icons=auto'
+fi
+if (( $+commands[lazygit] )); then
+  alias lg='lazygit'
+fi
+if (( $+commands[nvim] )); then
+  alias n='nvim'
+fi
+# Interactive alias for the OpenShell command. The dotfiles checkout deploys an
+# equivalent alias for Bash. An existing sbox command or alias stays.
+if ! alias sbox >/dev/null 2>&1 && ! type sbox >/dev/null 2>&1; then
+  alias sbox=sandbox
+fi
+
+if (( $+commands[fzf] )); then
+  source <(fzf --zsh)
+fi
+if (( $+commands[zoxide] )); then
+  eval "$(zoxide init zsh)"
+fi
+if (( $+commands[direnv] )); then
+  eval "$(direnv hook zsh)"
+fi
+if (( $+commands[herdr] )); then
+  eval "$(herdr completion zsh)"
+fi
+
+# Source a native Powerlevel10k installation when available. Homebrew uses the
+# first path, the Arch package the second, and Debian bootstrap the third.
+# The Nerd Font is installed in the terminal. This repository contains no font files.
+for _p10k_theme in \
+  /opt/homebrew/share/powerlevel10k/powerlevel10k.zsh-theme \
+  /usr/share/zsh-theme-powerlevel10k/powerlevel10k.zsh-theme \
+  /usr/share/powerlevel10k/powerlevel10k.zsh-theme; do
+  if [[ -r "$_p10k_theme" ]]; then
+    source "$_p10k_theme"
+    [[ ! -r "$HOME/.p10k.zsh" ]] || source "$HOME/.p10k.zsh"
+    break
+  fi
+done
+unset _p10k_theme
+
+[[ ! -r "$HOME/.config/dotfiles/local.zsh" ]] || source "$HOME/.config/dotfiles/local.zsh"
+
+# Keep upstream CLI installs ahead of paths added during interactive setup.
+export PATH="$HOME/.local/bin:$PATH"
