@@ -1,0 +1,12 @@
+#!/usr/bin/env bash
+set -euo pipefail
+# Direct interface to the bundled Moshi maintenance procedure.
+# Usage: moshi-maintenance [preview|upgrade|hooks|status|restart|set-usage-collection-off] [--platform PLATFORM]
+source_path=${BASH_SOURCE[0]}
+while [[ -L "$source_path" ]]; do
+    source_dir=$(cd -- "$(dirname -- "$source_path")" && pwd)
+    source_path=$(readlink "$source_path")
+    [[ "$source_path" == /* ]] || source_path="$source_dir/$source_path"
+done
+libexec_dir=$(cd -- "$(dirname -- "$source_path")/../libexec" && pwd)
+exec env MISE_AUTO_INSTALL=0 UV_PYTHON_DOWNLOADS=never uv run --offline --no-project --managed-python --python '>=3.11' python "$libexec_dir/moshi-maintenance.py" "$@"

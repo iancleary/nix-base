@@ -1,0 +1,13 @@
+#!/usr/bin/env bash
+set -euo pipefail
+# VS Code launcher for macOS and for Windows VS Code reached through WSL.
+if [[ "$(uname -s)" == "Darwin" ]]; then
+  # Set MACOS_VSCODE_LAUNCHER for a nonstandard VS Code installation.
+  launcher="${MACOS_VSCODE_LAUNCHER:-/Applications/Visual Studio Code.app/Contents/Resources/app/bin/code}"
+  [[ -x "$launcher" ]] || { printf 'macOS VS Code launcher not found: %s\n' "$launcher" >&2; exit 1; }
+else
+  # Set WSL_VSCODE_LAUNCHER when the Windows account name differs from the Linux account name.
+  launcher="${WSL_VSCODE_LAUNCHER:-/mnt/c/Users/$USER/AppData/Local/Programs/Microsoft VS Code/bin/code}"
+  [[ -x "$launcher" ]] || { printf 'Windows VS Code launcher not found: %s\n' "$launcher" >&2; exit 1; }
+fi
+exec "$launcher" "$@"

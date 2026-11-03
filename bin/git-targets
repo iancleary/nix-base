@@ -1,0 +1,1014 @@
+#!/usr/bin/env bash
+# Git account targets: one table drives clone, login, status, and gitconfig layout.
+#
+# The tool is generic. The account table (key, directory, host, username, email,
+# login, gitconfig, credential, tool) and the gitconfig files it names live in a
+# separate configuration checkout; they are never embedded here. The table uses
+# parallel indexed arrays so the tool also runs under macOS system Bash 3.2.
+#
+# Table resolution order:
+#   1. --table PATH
+#   2. $GIT_TARGETS_TABLE
+#   3. $XDG_CONFIG_HOME/git-targets/targets.tsv (default ~/.config/git-targets/targets.tsv)
+#
+# Every file the table names resolves relative to the table file's own
+# directory, so a symlinked table keeps working from its source checkout:
+#   - <gitconfig column>  ->  <table dir>/<gitconfig column>
+#   - the base gitconfig  ->  <table dir>/gitconfig
+#   - the GitHub helper   ->  <table dir>/gitconfig-github
+#
+# Comment directives in the table define aliases:
+#   # alias lab personal-gitlab
+# "work" is always rejected: it used to mean one account, and picking the wrong
+# account would commit with the wrong identity.
+#
+# Tokens are never printed. This tool does not delete credential stores or keyrings.
+set -euo pipefail
+set +x
+
+GIT_TILDE='~'
+GIT_TABLE=''
+GIT_SOURCE_DIR=''
+
+T_KEYS=()
+T_DIRS=()
+T_HOSTS=()
+T_USERS=()
+T_EMAILS=()
+T_LOGINS=()
+T_CFGS=()
+T_CREDS=()
+T_TOOLS=()
+A_NAMES=()
+A_KEYS=()
+
+git_usage() {
+  cat <<'EOF'
+Usage: git-targets [--table PATH] list
+       git-targets [--table PATH] clone <key> <group/repo[.git] | https-url>
+       git-targets [--table PATH] login <key>
+       git-targets [--table PATH] status <key|all>
+       git-targets [--table PATH] migrate [--apply]
+
+The table defaults to $GIT_TARGETS_TABLE, then
+$XDG_CONFIG_HOME/git-targets/targets.tsv. Named files resolve relative to the
+table directory. Alias directives (# alias NAME KEY) come from the table.
+"work" is not accepted as a key because it is ambiguous.
+EOF
+}
+
+git_die() {
+  printf 'git-targets: %s\n' "$1" >&2
+  exit 1
+}
+
+git_table_candidates() {
+  if [[ -n "$GIT_TABLE" ]]; then
+    printf '%s\n' "$GIT_TABLE"
+    return 0
+  fi
+  if [[ -n "${GIT_TARGETS_TABLE:-}" ]]; then
+    printf '%s\n' "$GIT_TARGETS_TABLE"
+    return 0
+  fi
+  if [[ -n "${XDG_CONFIG_HOME:-}" ]]; then
+    printf '%s\n' "$XDG_CONFIG_HOME/git-targets/targets.tsv"
+  elif [[ -n "${HOME:-}" ]]; then
+    printf '%s\n' "$HOME/.config/git-targets/targets.tsv"
+  fi
+}
+
+# Resolve symlinks without depending on GNU realpath.
+git_realpath_dir() {
+  local path="$1" dir
+  while [[ -L "$path" ]]; do
+    dir=$(cd -- "$(dirname -- "$path")" && pwd)
+    path=$(readlink "$path")
+    [[ "$path" == /* ]] || path="$dir/$path"
+  done
+  cd -- "$(dirname -- "$path")" && pwd
+}
+
+git_source_dir() {
+  [[ -n "$GIT_SOURCE_DIR" ]] && return 0
+  local candidate
+  candidate="$(git_table_candidates | head -n 1)"
+  if [[ -z "$candidate" ]]; then
+    git_die 'no target table: set GIT_TARGETS_TABLE or pass --table PATH'
+  fi
+  [[ -f "$candidate" ]] || git_die "target table is missing: $candidate (set GIT_TARGETS_TABLE or pass --table PATH)"
+  GIT_SOURCE_DIR="$(git_realpath_dir "$candidate")"
+}
+
+# Index of a key in the table, or 100 when absent.
+git_key_index() {
+  local i
+  for i in "${!T_KEYS[@]}"; do
+    [[ "${T_KEYS[$i]}" == "$1" ]] && { printf '%s\n' "$i"; return 0; }
+  done
+  printf '100\n'
+}
+
+git_load() {
+  local table line key directory host username email login gitconfig credential tool
+  [[ ${#T_KEYS[@]} -eq 0 ]] && [[ ${#A_NAMES[@]} -eq 0 ]] || return 0
+  git_source_dir
+  table="$(git_table_candidates | head -n 1)"
+  while IFS=$'\t' read -r key directory host username email login gitconfig credential tool || [[ -n "${key:-}" ]]; do
+    if [[ "$key" == "#"* ]]; then
+      if [[ "$key" == '# alias '* ]]; then
+        local alias_name alias_key
+        alias_name="${key#\# alias }"
+        alias_key="${alias_name#* }"
+        alias_name="${alias_name%% *}"
+        [[ -n "$alias_name" && -n "$alias_key" && "$alias_name" != *" "* && "$alias_key" != *" "* ]] \
+          || git_die "malformed alias directive: $key"
+        [[ "$alias_name" != "work" ]] || git_die '"work" is reserved and cannot be an alias'
+        A_NAMES+=("$alias_name")
+        A_KEYS+=("$alias_key")
+      fi
+      continue
+    fi
+    [[ -z "${key:-}" || "$key" == "key" ]] && continue
+    [[ -n "$directory" && -n "$host" && -n "$username" && -n "$email" && -n "$login" && -n "$gitconfig" && -n "$credential" && -n "$tool" ]] || {
+      printf 'git-targets: incomplete target row: %s\n' "$key" >&2
+      exit 1
+    }
+    [[ "$(git_key_index "$key")" == "100" ]] || {
+      printf 'git-targets: duplicate target key: %s\n' "$key" >&2
+      exit 1
+    }
+    case "$credential" in
+      keyring|store) ;;
+      *) printf 'git-targets: unsupported credential kind for %s\n' "$key" >&2; exit 1 ;;
+    esac
+    case "$tool" in
+      gh|glab|store) ;;
+      *) printf 'git-targets: unsupported auth tool for %s\n' "$key" >&2; exit 1 ;;
+    esac
+    if [[ "$email" == "-" ]]; then
+      printf 'git-targets: %s has no email in the target table; refusing to invent one.\n' "$key" >&2
+      exit 1
+    fi
+    T_KEYS+=("$key")
+    T_DIRS+=("$directory")
+    T_HOSTS+=("$host")
+    T_USERS+=("$username")
+    T_EMAILS+=("$email")
+    T_LOGINS+=("$login")
+    T_CFGS+=("$gitconfig")
+    T_CREDS+=("$credential")
+    T_TOOLS+=("$tool")
+  done < "$table"
+  [[ ${#T_KEYS[@]} -gt 0 ]] || {
+    printf 'git-targets: target table has no accounts.\n' >&2
+    exit 1
+  }
+}
+
+git_print_keys() {
+  local i user
+  git_load
+  printf 'Keys:\n'
+  for i in "${!T_KEYS[@]}"; do
+    user="${T_USERS[$i]}"
+    [[ "$user" == "-" ]] && user="(no git username)"
+    printf '  %s  ~/%s/  %s  %s  %s\n' "${T_KEYS[$i]}" "${T_DIRS[$i]}" "${T_HOSTS[$i]}" "$user" "${T_CREDS[$i]}"
+  done
+  if [[ ${#A_NAMES[@]} -gt 0 ]]; then
+    printf 'Aliases:'
+    for i in "${!A_NAMES[@]}"; do
+      printf ' %s -> %s' "${A_NAMES[$i]}" "${A_KEYS[$i]}"
+    done
+    printf '\n'
+  fi
+  printf '"work" is not accepted: it is ambiguous, and the wrong identity would apply.\n'
+}
+
+git_reject_work() {
+  printf 'git-targets: "work" is ambiguous, so it is not accepted.\n' >&2
+  git_print_keys >&2
+  exit 2
+}
+
+git_unknown_key() {
+  printf 'git-targets: unknown target "%s".\n' "$1" >&2
+  git_print_keys >&2
+  exit 2
+}
+
+git_resolve_key() {
+  local raw="$1" i index
+  git_load
+  case "$raw" in
+    work) git_reject_work ;;
+  esac
+  for i in "${!A_NAMES[@]}"; do
+    [[ "${A_NAMES[$i]}" == "$raw" ]] && { printf '%s\n' "${A_KEYS[$i]}"; return 0; }
+  done
+  index="$(git_key_index "$raw")"
+  if [[ "$index" != "100" ]]; then
+    printf '%s\n' "$raw"
+  else
+    git_unknown_key "$raw"
+  fi
+}
+
+git_select() {
+  local key="$1" i
+  git_load
+  i="$(git_key_index "$key")"
+  [[ "$i" != "100" ]] || git_unknown_key "$key"
+  SEL_KEY="$key"
+  SEL_DIR="${T_DIRS[$i]}"
+  SEL_HOST="${T_HOSTS[$i]}"
+  SEL_USER="${T_USERS[$i]}"
+  SEL_CFG="${T_CFGS[$i]}"
+  SEL_CRED="${T_CREDS[$i]}"
+  SEL_TOOL="${T_TOOLS[$i]}"
+  SEL_FILE="$HOME/.$SEL_CFG"
+  SEL_SOURCE="$GIT_SOURCE_DIR/$SEL_CFG"
+}
+
+git_config_server() {
+  local config="$1" keys="" key candidate="" server=""
+  GIT_SERVER=""
+  if ! keys="$(git config --file "$config" --name-only --get-regexp '^credential\.https://[^/]+\.[^.]+$')"; then
+    return 1
+  fi
+  while IFS= read -r key; do
+    [[ -n "$key" ]] || continue
+    candidate="${key#credential.}"
+    candidate="${candidate%.*}"
+    if [[ -n "$server" && "$server" != "$candidate" ]]; then
+      return 2
+    fi
+    server="$candidate"
+  done <<< "$keys"
+  [[ -n "$server" ]] || return 1
+  GIT_SERVER="$server"
+}
+
+git_read_server() {
+  local config="$1" rc=0
+  git_config_server "$config" || rc=$?
+  if [[ "$rc" -eq 1 ]]; then
+    printf 'git-targets: cannot read an HTTPS credential server from %s.\n' "$config" >&2
+    return 1
+  fi
+  if [[ "$rc" -eq 2 ]]; then
+    printf 'git-targets: multiple HTTPS credential servers in %s; select one in the config first.\n' "$config" >&2
+    return 1
+  fi
+  printf '%s\n' "$GIT_SERVER"
+}
+
+git_parse_includes() {
+  local file="$1" line condition="" plain=0 lineno=0 path
+  INC_COND=()
+  INC_PATH=()
+  INC_LINE=()
+  INC_PLAIN=()
+  INC_GITHUB_LINE=0
+  while IFS= read -r line || [[ -n "$line" ]]; do
+    lineno=$((lineno + 1))
+    case "$line" in
+      '[includeIf "'*'"'']')
+        condition="${line#\[includeIf \"}"
+        condition="${condition%\"]}"
+        plain=0
+        ;;
+      '[include]')
+        condition=""
+        plain=1
+        ;;
+      '    path = '*)
+        path="${line#    path = }"
+        if [[ "$plain" -eq 1 || -z "$condition" ]]; then
+          INC_PLAIN+=("$path")
+          [[ "$path" == "${GIT_TILDE}/.gitconfig-github" ]] && INC_GITHUB_LINE=$lineno
+        else
+          INC_COND+=("$condition")
+          INC_PATH+=("$path")
+          INC_LINE+=("$lineno")
+        fi
+        ;;
+    esac
+  done < "$file"
+}
+
+git_known_include_path() {
+  case "$1" in
+    "${GIT_TILDE}/.gitconfig-github"|"${GIT_TILDE}/.gitconfig-personal"|"${GIT_TILDE}/.gitconfig-lab"|"${GIT_TILDE}/.gitconfig-work"|\
+      "${GIT_TILDE}/.gitconfig-personal-github"|"${GIT_TILDE}/.gitconfig-personal-gitlab"|\
+      "${GIT_TILDE}/.gitconfig-work-github"|"${GIT_TILDE}/.gitconfig-work-gitlab") return 0 ;;
+    *) return 1 ;;
+  esac
+}
+
+# Collect every directory that holds an account directory from the table, so a
+# clone parked directly inside it (a "flat clone") is reported for migration.
+git_flat_clone_parents() {
+  local i parent
+  FLAT_PARENTS=()
+  for i in "${!T_KEYS[@]}"; do
+    [[ "${T_DIRS[$i]}" == */* ]] || continue
+    parent="${T_DIRS[$i]%%/*}"
+    case " ${FLAT_PARENTS[*]+${FLAT_PARENTS[*]}} " in
+      *" $parent "*) ;;
+      *) FLAT_PARENTS+=("$parent") ;;
+    esac
+  done
+}
+
+git_layout_errors() {
+  local i key file server rc=0 got user condition expected path found_line \
+    host_helpers generic_helpers
+  LAYOUT_ERRORS=()
+  git_load
+  if [[ ! -f "$HOME/.gitconfig" ]]; then
+    LAYOUT_ERRORS+=("$HOME/.gitconfig is missing")
+  else
+    git_parse_includes "$HOME/.gitconfig"
+    if [[ ! -f "$HOME/.gitconfig-github" ]]; then
+      LAYOUT_ERRORS+=("$HOME/.gitconfig-github is missing")
+    elif ! git config --file "$HOME/.gitconfig-github" --get-all credential.https://github.com.helper 2>/dev/null | grep -qx '!gh auth git-credential'; then
+      LAYOUT_ERRORS+=("$HOME/.gitconfig-github must set the gh credential helper for github.com")
+    fi
+    for path in "${INC_PLAIN[@]}" "${INC_PATH[@]}"; do
+      case "$path" in
+        "${GIT_TILDE}/.gitconfig-personal"|"${GIT_TILDE}/.gitconfig-lab"|"${GIT_TILDE}/.gitconfig-work")
+          LAYOUT_ERRORS+=("include still points at retired $path")
+          ;;
+      esac
+    done
+    for i in "${!T_KEYS[@]}"; do
+      key="${T_KEYS[$i]}"
+      condition="gitdir:${GIT_TILDE}/${T_DIRS[$i]}/"
+      expected="${GIT_TILDE}/.${T_CFGS[$i]}"
+      found=""
+      found_line=0
+      for path in "${!INC_COND[@]}"; do
+        [[ "${INC_COND[$path]}" == "$condition" ]] || continue
+        if [[ -n "$found" && "$found" != "${INC_PATH[$path]}" ]]; then
+          LAYOUT_ERRORS+=("multiple includes for $condition")
+        fi
+        found="${INC_PATH[$path]}"
+        found_line="${INC_LINE[$path]}"
+      done
+      if [[ "$found" != "$expected" ]]; then
+        LAYOUT_ERRORS+=("include for $condition is '${found:-missing}', expected $expected")
+      fi
+      # An account that resets the github.com helper must be included after
+      # ~/.gitconfig-github so its reset is the last word for github.com.
+      if [[ "$found_line" -ne 0 && "$INC_GITHUB_LINE" -ne 0 && "$found_line" -lt "$INC_GITHUB_LINE" \
+        && -f "$HOME/.${T_CFGS[$i]}" ]] \
+        && git config --file "$HOME/.${T_CFGS[$i]}" --get-all "credential.https://github.com.helper" 2>/dev/null | grep -q .; then
+        LAYOUT_ERRORS+=("$key must be included after ${GIT_TILDE}/.gitconfig-github so its github.com helper reset applies")
+      fi
+    done
+  fi
+  for i in "${!T_KEYS[@]}"; do
+    key="${T_KEYS[$i]}"
+    file="$HOME/.${T_CFGS[$i]}"
+    if [[ ! -f "$file" ]]; then
+      LAYOUT_ERRORS+=("$file is missing or unreadable for $key")
+      continue
+    fi
+    got="$(git config --file "$file" --get user.email 2>/dev/null || true)"
+    if [[ "$got" != "${T_EMAILS[$i]}" ]]; then
+      LAYOUT_ERRORS+=("$key email is '${got:-blank}', expected ${T_EMAILS[$i]}")
+    fi
+    server=""
+    rc=0
+    git_config_server "$file" || rc=$?
+    if [[ "$rc" -eq 2 ]]; then
+      LAYOUT_ERRORS+=("$key config declares more than one HTTPS credential server")
+    elif [[ "$rc" -ne 0 || "$GIT_SERVER" != "https://${T_HOSTS[$i]}" ]]; then
+      LAYOUT_ERRORS+=("$key config server is '${GIT_SERVER:-unreadable}', expected https://${T_HOSTS[$i]}")
+    fi
+    user="${T_USERS[$i]}"
+    got="$(git config --file "$file" --get "credential.https://${T_HOSTS[$i]}.username" 2>/dev/null || true)"
+    if [[ "$user" == "-" ]]; then
+      if [[ -n "$got" ]]; then
+        LAYOUT_ERRORS+=("$key declares credential username '$got'; the target table leaves it unset")
+      fi
+    elif [[ "$got" != "$user" ]]; then
+      LAYOUT_ERRORS+=("$key credential username is '${got:-blank}', expected $user")
+    fi
+    case "${T_CREDS[$i]}" in
+      store)
+        host_helpers="$(git config --file "$file" --get-all "credential.https://${T_HOSTS[$i]}.helper" 2>/dev/null || true)"
+        generic_helpers="$(git config --file "$file" --get-all credential.helper 2>/dev/null || true)"
+        if ! printf '%s\n%s\n' "$host_helpers" "$generic_helpers" | grep -qx 'store'; then
+          LAYOUT_ERRORS+=("$key must set the store credential helper")
+        fi
+        # ~/.gitconfig-github sets a host-specific gh helper. A generic
+        # credential.helper does not replace it, so github.com store targets
+        # have to reset credential.https://github.com.helper themselves.
+        if [[ "${T_HOSTS[$i]}" == "github.com" ]] && ! printf '%s\n' "$host_helpers" | grep -qx 'store'; then
+          LAYOUT_ERRORS+=("$key must reset credential.https://github.com.helper to store so it replaces gh")
+        fi
+        if grep -q 'gh auth git-credential' "$file"; then
+          LAYOUT_ERRORS+=("$key must not use the gh credential helper")
+        fi
+        ;;
+      keyring)
+        if git config --file "$file" --get-all credential.helper 2>/dev/null | grep -qx 'store'; then
+          LAYOUT_ERRORS+=("$key must not set the store helper; it uses ${T_TOOLS[$i]} keyring")
+        fi
+        if [[ "${T_TOOLS[$i]}" == glab ]]; then
+          if ! git config --file "$file" --get-all "credential.https://${T_HOSTS[$i]}.helper" 2>/dev/null | grep -qx '!glab auth git-credential'; then
+            LAYOUT_ERRORS+=("$key must set the glab credential helper for https://${T_HOSTS[$i]}")
+          fi
+        fi
+        ;;
+    esac
+  done
+  local old parent child base is_account_dir
+  for old in .gitconfig-personal .gitconfig-lab .gitconfig-work; do
+    if [[ -e "$HOME/$old" || -L "$HOME/$old" ]]; then
+      LAYOUT_ERRORS+=("retired file still present: $HOME/$old")
+    fi
+  done
+  git_flat_clone_parents
+  for parent in "${FLAT_PARENTS[@]+${FLAT_PARENTS[@]}}"; do
+    [[ -d "$HOME/$parent" ]] || continue
+    for child in "$HOME/$parent"/*; do
+      [[ -e "$child" ]] || continue
+      base="${child##*/}"
+      is_account_dir=0
+      for i in "${!T_KEYS[@]}"; do
+        [[ "${T_DIRS[$i]}" == "$parent/$base" ]] && is_account_dir=1
+      done
+      [[ "$is_account_dir" -eq 1 ]] && continue
+      if [[ -d "$child" && -e "$child/.git" ]]; then
+        LAYOUT_ERRORS+=("flat clone still at $child; run git-targets migrate so it cannot use the wrong identity")
+      fi
+    done
+  done
+}
+
+git_assert_layout() {
+  local error
+  git_layout_errors
+  [[ ${#LAYOUT_ERRORS[@]} -eq 0 ]] || {
+    printf 'git-targets: refusing to continue because this host is half-migrated or does not match the target table.\n' >&2
+    printf 'The wrong GitHub or GitLab identity would otherwise apply. No credentials were deleted.\n' >&2
+    for error in "${LAYOUT_ERRORS[@]}"; do
+      printf 'git-targets: %s\n' "$error" >&2
+    done
+    printf 'git-targets: review with: git-targets migrate\n' >&2
+    return 1
+  }
+}
+
+git_reject_env() {
+  local name
+  for name in "$@"; do
+    if [[ -n "${!name:-}" ]]; then
+      printf 'Unset %s in this terminal before enrolling a host-local PAT.\n' "$name" >&2
+      exit 1
+    fi
+  done
+}
+
+git_require_tty() {
+  local action="$1"
+  if [[ ! -t 0 || ! -t 1 ]]; then
+    printf 'Run git-targets %s yourself in an interactive terminal.\n' "$action" >&2
+    exit 1
+  fi
+}
+
+git_safe_jq_token() {
+  [[ "$1" =~ ^[A-Za-z0-9._-]+$ ]]
+}
+
+git_login_gh() {
+  local result expr
+  git_reject_env GH_TOKEN GITHUB_TOKEN CI GITHUB_ACTIONS GH_PROMPT_DISABLED
+  git_require_tty login
+  if ! git_safe_jq_token "$SEL_HOST" || ! git_safe_jq_token "$SEL_USER"; then
+    printf 'git-targets: refusing gh login because the host or username is not a plain identifier.\n' >&2
+    exit 1
+  fi
+  export MISE_AUTO_INSTALL=0
+  printf 'Choose Paste an authentication token. If asked to authenticate Git, choose No: the account table owns credential helper routing.\n'
+  gh auth login --hostname "$SEL_HOST" --git-protocol https
+  expr=".hosts[\"$SEL_HOST\"] | any(.active and .state == \"success\" and .tokenSource == \"keyring\" and .login == \"$SEL_USER\")"
+  result="$(gh auth status --hostname "$SEL_HOST" --active --json hosts --jq "$expr")"
+  if [[ "$result" != true ]]; then
+    printf 'git-targets: GitHub login was not verified in keyring storage for %s. Stop and fix authentication/storage; no credentials were erased.\n' "$SEL_USER" >&2
+    exit 1
+  fi
+  gh auth status --hostname "$SEL_HOST" --active
+}
+
+git_login_glab() {
+  git_reject_env GITLAB_TOKEN GITLAB_ACCESS_TOKEN OAUTH_TOKEN CI GITLAB_CI GLAB_USE_KEYRING USE_KEYRING
+  git_require_tty login
+  export MISE_AUTO_INSTALL=0
+  printf 'If asked to authenticate Git, choose No: the account table owns credential helper routing.\n'
+  glab auth login --hostname "$SEL_HOST" --git-protocol https
+  if [[ "$(glab config get --global --host "$SEL_HOST" use_keyring)" != true ]]; then
+    printf 'git-targets: login for %s did not select keyring storage. Stop and fix the keyring; no credentials were erased.\n' "$SEL_HOST" >&2
+    exit 1
+  fi
+  glab auth status --hostname "$SEL_HOST"
+  if [[ "$SEL_CRED" == "store" ]]; then
+    printf 'git-targets: %s still uses credential.helper=store for Git; this updates glab only.\n' "$SEL_KEY"
+  fi
+}
+
+git_store_has() {
+  local username="$1" host="$2" store="$HOME/.git-credentials" line
+  [[ -f "$store" ]] || return 1
+  while IFS= read -r line || [[ -n "$line" ]]; do
+    case "$line" in
+      "https://${username}:"*"@${host}"|"https://${username}:"*"@${host}/"*) return 0 ;;
+    esac
+  done < "$store"
+  return 1
+}
+
+git_login_store() {
+  local password="" store="$HOME/.git-credentials"
+  [[ "$SEL_USER" != "-" && -n "$SEL_USER" ]] || {
+    printf 'git-targets: %s has no username; refusing to store a PAT.\n' "$SEL_KEY" >&2
+    exit 1
+  }
+  git_reject_env GH_TOKEN GITHUB_TOKEN GH_ENTERPRISE_TOKEN CI GITHUB_ACTIONS GH_PROMPT_DISABLED
+  git_require_tty login
+  printf 'HTTPS PAT for %s at %s (input hidden): ' "$SEL_USER" "$SEL_HOST" >&2
+  IFS= read -r -s password || {
+    printf '\n' >&2
+    exit 1
+  }
+  printf '\n' >&2
+  password="${password%$'\r'}"
+  if [[ -z "$password" || "$password" == *[[:space:]]* ]]; then
+    printf 'git-targets: token must be one line without spaces. Nothing was stored.\n' >&2
+    exit 1
+  fi
+  umask 077
+  # The helper action is "store". "approve" is the git credential front end and
+  # this built-in ignores it without writing a file.
+  if ! {
+    printf 'protocol=https\n'
+    printf 'host=%s\n' "$SEL_HOST"
+    printf 'username=%s\n' "$SEL_USER"
+    printf 'password=%s\n' "$password"
+    printf '\n'
+  } | git credential-store --file "$store" store; then
+    password=""
+    unset password
+    printf 'git-targets: credential store update failed. The token was not printed and no keyring entry was changed.\n' >&2
+    exit 1
+  fi
+  password=""
+  unset password
+  if ! git_store_has "$SEL_USER" "$SEL_HOST"; then
+    printf 'git-targets: credential store does not contain an entry for %s at %s. Nothing was printed.\n' "$SEL_USER" "$SEL_HOST" >&2
+    exit 1
+  fi
+  printf 'Stored an HTTPS PAT for %s at %s in the git credential store. The token was not printed.\n' "$SEL_USER" "$SEL_HOST"
+}
+
+git_login_selected() {
+  case "$SEL_TOOL" in
+    gh) git_login_gh ;;
+    glab) git_login_glab ;;
+    store) git_login_store ;;
+    *) printf 'git-targets: %s has no login implementation.\n' "$SEL_KEY" >&2; exit 1 ;;
+  esac
+}
+
+git_status_one() {
+  local result expr
+  git_select "$1"
+  case "$SEL_TOOL" in
+    gh)
+      export MISE_AUTO_INSTALL=0
+      gh auth status --hostname "$SEL_HOST" --active
+      if ! git_safe_jq_token "$SEL_HOST" || ! git_safe_jq_token "$SEL_USER"; then
+        printf 'git-targets: %s host or username cannot be checked safely.\n' "$SEL_KEY" >&2
+        return 1
+      fi
+      expr=".hosts[\"$SEL_HOST\"] | any(.active and .state == \"success\" and .tokenSource == \"keyring\" and .login == \"$SEL_USER\")"
+      result="$(gh auth status --hostname "$SEL_HOST" --active --json hosts --jq "$expr" 2>/dev/null || true)"
+      if [[ "$result" != true ]]; then
+        printf 'git-targets: %s gh account is not active keyring user %s. No token was printed.\n' "$SEL_KEY" "$SEL_USER" >&2
+        return 1
+      fi
+      ;;
+    glab)
+      export MISE_AUTO_INSTALL=0
+      glab auth status --hostname "$SEL_HOST"
+      ;;
+    store)
+      if git_store_has "$SEL_USER" "$SEL_HOST"; then
+        printf '%s: stored HTTPS credential present for %s at %s (token not shown).\n' "$SEL_KEY" "$SEL_USER" "$SEL_HOST"
+      else
+        printf '%s: no stored HTTPS PAT for %s at %s. Run: git-targets login %s\n' "$SEL_KEY" "$SEL_USER" "$SEL_HOST" "$SEL_KEY" >&2
+        return 1
+      fi
+      ;;
+    *)
+      printf 'git-targets: %s has no status check.\n' "$SEL_KEY" >&2
+      return 1
+      ;;
+  esac
+}
+
+git_cmd_list() {
+  local i user
+  git_load
+  printf 'key\tdirectory\thost\tusername\temail\tcredential\n'
+  for i in "${!T_KEYS[@]}"; do
+    user="${T_USERS[$i]}"
+    [[ "$user" == "-" ]] && user=""
+    printf '%s\t~/%s/\t%s\t%s\t%s\t%s\n' "${T_KEYS[$i]}" "${T_DIRS[$i]}" "${T_HOSTS[$i]}" "$user" "${T_EMAILS[$i]}" "${T_CREDS[$i]}"
+  done
+}
+
+git_cmd_login() {
+  local key
+  [[ $# -eq 1 ]] || {
+    printf 'Usage: git-targets login <key>\n' >&2
+    git_print_keys >&2
+    exit 2
+  }
+  key="$(git_resolve_key "$1")"
+  git_select "$key"
+  git_login_selected
+}
+
+git_cmd_status() {
+  local key rc=0
+  [[ $# -eq 1 ]] || {
+    printf 'Usage: git-targets status <key|all>\n' >&2
+    git_print_keys >&2
+    exit 2
+  }
+  git_assert_layout || return 1
+  printf 'git-targets: config layout matches the target table.\n'
+  if [[ "$1" == all ]]; then
+    for key in "${T_KEYS[@]}"; do
+      git_status_one "$key" || rc=1
+    done
+    return "$rc"
+  fi
+  key="$(git_resolve_key "$1")"
+  git_status_one "$key"
+}
+
+git_remote_host() {
+  local url="$1" rest
+  case "$url" in
+    https://*)
+      rest="${url#https://}"
+      rest="${rest%%/*}"
+      rest="${rest#*@}"
+      printf '%s\n' "$rest"
+      ;;
+    ssh://*)
+      rest="${url#ssh://}"
+      rest="${rest#*@}"
+      rest="${rest%%/*}"
+      printf '%s\n' "$rest"
+      ;;
+    git@*:*)
+      rest="${url#git@}"
+      rest="${rest%%:*}"
+      printf '%s\n' "$rest"
+      ;;
+    *) return 1 ;;
+  esac
+}
+
+git_repo_hosts() {
+  local dir="$1" remote_urls name url host
+  REPO_HOSTS=()
+  remote_urls="$(git config --file "$dir/.git/config" --no-includes \
+    --get-regexp '^remote\..*\.(url|pushurl)$')" || return 1
+  while read -r name url; do
+    host="$(git_remote_host "$url")" || return 1
+    [[ -n "$host" ]] || return 1
+    case " ${REPO_HOSTS[*]+${REPO_HOSTS[*]}} " in
+      *" $host "*) ;;
+      *) REPO_HOSTS+=("$host") ;;
+    esac
+  done <<< "$remote_urls"
+}
+
+git_classify() {
+  local i key directory target_directory repository_status
+  ACTION_KIND=()
+  ACTION_A=()
+  ACTION_B=()
+  MIGRATE_REFUSALS=()
+  git_load
+  git_flat_clone_parents
+  for i in "${!T_KEYS[@]}"; do
+    key="${T_KEYS[$i]}"
+    git_select "$key"
+    if [[ -L "$SEL_FILE" && "$SEL_FILE" -ef "$SEL_SOURCE" ]]; then
+      :
+    elif [[ ! -e "$SEL_SOURCE" ]]; then
+      MIGRATE_REFUSALS+=("table source missing: $SEL_SOURCE")
+    else
+      git_add_action relink "$SEL_FILE" "$SEL_SOURCE"
+    fi
+    [[ -d "$HOME/$SEL_DIR" ]] || git_add_action mkdir "$HOME/$SEL_DIR"
+  done
+  # Match every account directory's forge parent names without moving
+  # personal checkouts that are not named by the table.
+  for i in "${!T_KEYS[@]}"; do
+    [[ "${T_DIRS[$i]}" == */* ]] || continue
+    directory="$HOME/${T_DIRS[$i]%%/*}"
+    if [[ -d "$directory" ]]; then
+      continue
+    elif [[ -e "$directory" || -L "$directory" ]]; then
+      MIGRATE_REFUSALS+=("$directory exists but is not a directory")
+    else
+      git_add_action mkdir "$directory"
+    fi
+  done
+  local github_file="$HOME/.gitconfig-github" github_source="$GIT_SOURCE_DIR/gitconfig-github"
+  if [[ -L "$github_file" && "$github_file" -ef "$github_source" ]]; then
+    :
+  elif [[ ! -e "$github_source" ]]; then
+    MIGRATE_REFUSALS+=("table source missing: $github_source")
+  else
+    git_add_action relink "$github_file" "$github_source"
+  fi
+  local gitconfig="$HOME/.gitconfig" source="$GIT_SOURCE_DIR/gitconfig" path
+  if [[ -L "$gitconfig" && "$gitconfig" -ef "$source" ]]; then
+    :
+  elif [[ ! -e "$gitconfig" && ! -L "$gitconfig" ]]; then
+    git_add_action relink "$gitconfig" "$source"
+  elif [[ -f "$gitconfig" ]]; then
+    git_parse_includes "$gitconfig"
+    local unknown=0
+    for path in "${INC_PLAIN[@]}" "${INC_PATH[@]}"; do
+      git_known_include_path "$path" || unknown=1
+    done
+    if [[ "$unknown" -eq 0 ]]; then
+      git_add_action relink "$gitconfig" "$source"
+    else
+      MIGRATE_REFUSALS+=("$gitconfig is a regular file with an include this migration does not recognize; back it up yourself before replacing it")
+    fi
+  else
+    git_add_action relink "$gitconfig" "$source"
+  fi
+  local old
+  for old in .gitconfig-personal .gitconfig-lab .gitconfig-work; do
+    path="$HOME/$old"
+    [[ -e "$path" || -L "$path" ]] || continue
+    git_add_action retire "$path"
+  done
+  local flat_parent
+  for flat_parent in "${FLAT_PARENTS[@]+${FLAT_PARENTS[@]}}"; do
+    git_classify_flat_clones "$flat_parent"
+  done
+}
+
+git_classify_flat_clones() {
+  # Move clean clones parked directly inside a forge parent into the account
+  # directory their single remote host selects.
+  local parent="$1" child base dest host target_directory repository_status
+  local i key is_account_dir
+  [[ -d "$HOME/$parent" ]] || return 0
+  for child in "$HOME/$parent"/*; do
+    [[ -e "$child" ]] || continue
+    base="${child##*/}"
+    is_account_dir=0
+    for i in "${!T_KEYS[@]}"; do
+      [[ "${T_DIRS[$i]}" == "$parent/$base" ]] && is_account_dir=1
+    done
+    [[ "$is_account_dir" -eq 1 ]] && continue
+    [[ -d "$child" && -e "$child/.git" ]] || continue
+    if [[ -L "$child" ]]; then
+      MIGRATE_REFUSALS+=("$child is a symlink; refusing to move it")
+      continue
+    fi
+    if [[ ! -d "$child/.git" || -L "$child/.git" ]]; then
+      MIGRATE_REFUSALS+=("$child does not have a standalone .git directory; refusing to move it")
+      continue
+    fi
+    if ! git_repo_hosts "$child" || [[ ${#REPO_HOSTS[@]} -ne 1 ]]; then
+      MIGRATE_REFUSALS+=("$child/.git/config does not declare exactly one supported remote host; refusing to move it")
+      continue
+    fi
+    host="${REPO_HOSTS[0]}"
+    target_directory=""
+    for i in "${!T_KEYS[@]}"; do
+      if [[ "${T_HOSTS[$i]}" == "$host" && "${T_DIRS[$i]}" == */* ]]; then
+        target_directory="${T_DIRS[$i]}"
+        break
+      fi
+    done
+    if [[ -z "$target_directory" ]]; then
+      MIGRATE_REFUSALS+=("$child remote host $host does not match an account directory in the target table; refusing to move it")
+      continue
+    fi
+    dest="$HOME/$target_directory/$base"
+    if ! repository_status="$(GIT_OPTIONAL_LOCKS=0 git -C "$child" status --porcelain --untracked-files=all)"; then
+      MIGRATE_REFUSALS+=("$child working tree status could not be read; refusing to move it")
+      continue
+    fi
+    if [[ -n "$repository_status" ]]; then
+      MIGRATE_REFUSALS+=("$child is dirty; commit, stash, or clean it before moving to $dest")
+      continue
+    fi
+    if [[ -e "$dest" || -L "$dest" ]]; then
+      MIGRATE_REFUSALS+=("destination already exists: $dest")
+      continue
+    fi
+    git_add_action move "$child" "$dest"
+  done
+}
+
+git_add_action() {
+  ACTION_KIND+=("$1")
+  ACTION_A+=("$2")
+  ACTION_B+=("${3:-}")
+}
+
+GIT_BACKUP=""
+
+git_backup_move() {
+  local path="$1" saved
+  [[ -n "$GIT_BACKUP" ]] || {
+    local root="${XDG_STATE_HOME:-$HOME/.local/state}/git-targets"
+    mkdir -p -- "$root"
+    GIT_BACKUP="$(mktemp -d "$root/migrate.XXXXXX")"
+  }
+  saved="$GIT_BACKUP/${path#"$HOME"/}"
+  mkdir -p -- "$(dirname -- "$saved")"
+  mv -- "$path" "$saved"
+  printf 'backed up %s -> %s\n' "$path" "$saved"
+}
+
+git_apply_action() {
+  local kind="$1" src="$2" dest="${3:-}"
+  case "$kind" in
+    mkdir)
+      mkdir -p -- "$src"
+      printf 'created %s\n' "$src"
+      ;;
+    move)
+      mkdir -p -- "$(dirname -- "$dest")"
+      mv -- "$src" "$dest"
+      printf 'moved %s -> %s\n' "$src" "$dest"
+      ;;
+    relink)
+      if [[ -e "$src" || -L "$src" ]]; then
+        git_backup_move "$src"
+      fi
+      ln -s -- "$dest" "$src"
+      printf 'linked %s -> %s\n' "$src" "$dest"
+      ;;
+    retire)
+      git_backup_move "$src"
+      printf 'retired %s\n' "$src"
+      ;;
+    *)
+      printf 'git-targets: unknown migrate action %s\n' "$kind" >&2
+      exit 1
+      ;;
+  esac
+}
+
+git_cmd_migrate() {
+  local apply=0 i
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      --apply) apply=1; shift ;;
+      --dry-run) apply=0; shift ;;
+      --help|-h)
+        printf 'Usage: git-targets migrate [--apply]\nDry-run is the default. --apply backs up retired configs, relinks the account files, creates each account directory and its forge parent, and moves clean clones parked in a forge parent into the account directory their remote host selects. Non-Git files and directories stay in place. It does not delete credentials, keyrings, or the git credential store.\n'
+        return 0
+        ;;
+      *)
+        printf 'git-targets: unknown migrate option: %s\n' "$1" >&2
+        return 2
+        ;;
+    esac
+  done
+  git_classify
+  if [[ ${#MIGRATE_REFUSALS[@]} -gt 0 ]]; then
+    local refusal i
+    for refusal in "${MIGRATE_REFUSALS[@]}"; do
+      printf 'refuse: %s\n' "$refusal"
+    done
+    for i in "${!ACTION_KIND[@]}"; do
+      printf 'would: %s %s %s\n' "${ACTION_KIND[$i]}" "${ACTION_A[$i]}" "${ACTION_B[$i]}"
+    done
+    printf 'git-targets: nothing was changed.\n'
+    return 1
+  fi
+  if [[ ${#ACTION_KIND[@]} -eq 0 ]]; then
+    printf 'git-targets: already migrated.\n'
+    return 0
+  fi
+  if [[ "$apply" -eq 0 ]]; then
+    for i in "${!ACTION_KIND[@]}"; do
+      printf 'would: %s %s %s\n' "${ACTION_KIND[$i]}" "${ACTION_A[$i]}" "${ACTION_B[$i]}"
+    done
+    printf 'git-targets: dry-run only. Re-run with --apply to change files. No credentials are deleted.\n'
+    return 0
+  fi
+  for i in "${!ACTION_KIND[@]}"; do
+    git_apply_action "${ACTION_KIND[$i]}" "${ACTION_A[$i]}" "${ACTION_B[$i]}"
+  done
+  if ! git_assert_layout; then
+    printf 'git-targets: layout still does not match after migrate. Backup: %s\n' "${GIT_BACKUP:-none}" >&2
+    return 1
+  fi
+  printf 'git-targets: migrated. Backup: %s\n' "${GIT_BACKUP:-none}"
+  printf 'git-targets: credential stores and keyrings were not deleted.\n'
+}
+
+git_cmd_clone() {
+  local key server parent input url repo
+  [[ $# -eq 2 ]] || {
+    printf 'Usage: git-targets clone <key> {group/repo[.git]|https://configured-host/group/repo[.git]}\n' >&2
+    git_print_keys >&2
+    exit 2
+  }
+  key="$(git_resolve_key "$1")"
+  git_select "$key"
+  git_assert_layout
+
+  if ! server="$(git_read_server "$SEL_FILE")"; then
+    exit 2
+  fi
+  if [[ "$server" != "https://$SEL_HOST" ]]; then
+    printf 'git-targets: %s declares %s, expected https://%s.\n' "$SEL_FILE" "$server" "$SEL_HOST" >&2
+    printf 'Refusing to clone; this config would use the wrong server. Run: git-targets migrate\n' >&2
+    exit 1
+  fi
+
+  parent="$HOME/$SEL_DIR"
+
+  input="${2%/}"
+  if [[ "$input" == https://* ]]; then
+    if [[ "$input" != "$server/"* ]]; then
+      printf 'git-targets: URL server must match %s for %s.\n' "$server" "$key" >&2
+      exit 2
+    fi
+    url="$input"
+  elif [[ "$input" == *://* ]]; then
+    printf 'Supply an HTTPS URL or a repository path.\n' >&2
+    exit 2
+  else
+    url="$server/${input#/}"
+  fi
+  if [[ ! "$url" =~ ^https://[^/?#[:space:]]+/[^?#[:space:]]+$ ]]; then
+    printf 'Supply a repository path without spaces, query parameters, or fragments.\n' >&2
+    exit 2
+  fi
+  repo="${url##*/}"
+  repo="${repo%.git}"
+  if [[ -z "$repo" || "$repo" == . || "$repo" == .. ]]; then
+    printf 'The URL must end with a repository name.\n' >&2
+    exit 2
+  fi
+
+  mkdir -p -- "$parent"
+  cd -- "$parent"
+  if [[ -e "$repo" || -L "$repo" ]]; then
+    printf 'Destination already exists: %s/%s\n' "$parent" "$repo" >&2
+    exit 1
+  fi
+  exec git clone -- "$url" "$repo"
+}
+
+git_main() {
+  local cmd="${1:-}"
+  [[ "${1:-}" == "--table" ]] && {
+    [[ $# -ge 2 ]] || git_die '--table needs a value'
+    GIT_TABLE="$2"
+    shift 2
+    cmd="${1:-}"
+  }
+  [[ $# -gt 0 ]] && shift
+  case "$cmd" in
+    list) git_cmd_list "$@" ;;
+    clone) git_cmd_clone "$@" ;;
+    login) git_cmd_login "$@" ;;
+    status) git_cmd_status "$@" ;;
+    migrate) git_cmd_migrate "$@" ;;
+    help|-h|--help) git_usage ;;
+    *) git_usage >&2; exit 2 ;;
+  esac
+}
+
+# Invoked as `clone`, the tool keeps the historical one-command form.
+if [[ "$(basename -- "$0")" == "clone" ]]; then
+  git_main clone "$@"
+else
+  git_main "$@"
+fi

@@ -1,0 +1,18 @@
+#!/usr/bin/env bash
+set -euo pipefail
+# Windows Vivado launcher for WSL. Set VIVADO_LAUNCHER to pin one installation.
+if [[ -n "${VIVADO_LAUNCHER:-}" ]]; then
+  [[ -f "$VIVADO_LAUNCHER" ]] || { printf 'Vivado launcher not found: %s\n' "$VIVADO_LAUNCHER" >&2; exit 1; }
+  exec /mnt/c/Windows/System32/cmd.exe /d /c "$(/usr/bin/wslpath -w "$VIVADO_LAUNCHER")" "$@"
+fi
+shopt -s nullglob
+candidates=(/mnt/c/AMDDesignTools/*/Vivado/bin/vivado.bat)
+if (( ${#candidates[@]} == 0 )); then
+  candidates=(/mnt/c/Xilinx/Vivado/*/bin/vivado.bat)
+fi
+if (( ${#candidates[@]} == 0 )); then
+  echo "No Windows Vivado installation found in AMDDesignTools or Xilinx/Vivado." >&2
+  exit 127
+fi
+launcher=$(printf '%s\n' "${candidates[@]}" | sort -V | tail -n 1)
+exec /mnt/c/Windows/System32/cmd.exe /d /c "$(/usr/bin/wslpath -w "$launcher")" "$@"

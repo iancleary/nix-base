@@ -1,9 +1,32 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+# Name the failing command instead of failing silently.
+trap 'status=$?; if (( status != 0 )); then printf "smoke: failed (exit %s): %s\n" "$status" "$BASH_COMMAND" >&2; fi' ERR
+
 bundle="${1:?Usage: smoke.sh BUNDLE_PATH}"
 for executable in age bat delta eza fd fzf git git-lfs gum jq lazygit rg shellcheck sops zoxide; do
   test -x "$bundle/bin/$executable"
+done
+
+# Tracked executables and their aliases ship in the same bundle.
+for executable in clone code code.exe git-targets moshi-maintenance moshi-status \
+  moshi-upgrade moshi-upgrade-preview powershell powershell.exe vivado vivado.exe; do
+  test -x "$bundle/bin/$executable"
+done
+test -L "$bundle/bin/clone" && test "$bundle/bin/clone" -ef "$bundle/bin/git-targets"
+test -L "$bundle/bin/code.exe" && test "$bundle/bin/code.exe" -ef "$bundle/bin/code"
+test -L "$bundle/bin/powershell" && test "$bundle/bin/powershell" -ef "$bundle/bin/powershell.exe"
+test -L "$bundle/bin/vivado.exe" && test "$bundle/bin/vivado.exe" -ef "$bundle/bin/vivado"
+
+# Home configuration and the bundled maintenance procedure ride along.
+for shared in share/nix-base/zshenv share/nix-base/zshrc share/nix-base/p10k.zsh \
+  libexec/moshi-maintenance.py; do
+  test -f "$bundle/$shared"
+done
+for tracked in git-targets code vivado powershell.exe moshi-status moshi-upgrade \
+  moshi-upgrade-preview moshi-maintenance; do
+  bash -n "$bundle/bin/$tracked"
 done
 
 "$bundle/bin/age" --version

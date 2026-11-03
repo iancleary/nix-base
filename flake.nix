@@ -21,12 +21,35 @@
       packages = forAllSystems (system:
         let pkgs = nixpkgs.legacyPackages.${system};
         in {
+          # Tracked executables and home configuration staged for the bundle.
+          # The build output, not the source tree, carries the .exe aliases.
+          files = pkgs.runCommand "nix-base-files" { } ''
+            mkdir -p "$out/bin" "$out/libexec" "$out/share/nix-base"
+            install -m 0555 ${./bin/git-targets} "$out/bin/git-targets"
+            ln -s git-targets "$out/bin/clone"
+            install -m 0555 ${./bin/moshi-status} "$out/bin/moshi-status"
+            install -m 0555 ${./bin/moshi-upgrade} "$out/bin/moshi-upgrade"
+            install -m 0555 ${./bin/moshi-upgrade-preview} "$out/bin/moshi-upgrade-preview"
+            install -m 0555 ${./bin/moshi-maintenance} "$out/bin/moshi-maintenance"
+            install -m 0555 ${./bin/code} "$out/bin/code"
+            install -m 0555 ${./bin/vivado} "$out/bin/vivado"
+            install -m 0555 ${./bin/powershell.exe} "$out/bin/powershell.exe"
+            ln -s code "$out/bin/code.exe"
+            ln -s powershell.exe "$out/bin/powershell"
+            ln -s vivado "$out/bin/vivado.exe"
+            install -m 0555 ${./libexec/moshi-maintenance.py} "$out/libexec/moshi-maintenance.py"
+            install -m 0444 ${./dotfiles/zshenv} "$out/share/nix-base/zshenv"
+            install -m 0444 ${./dotfiles/zshrc} "$out/share/nix-base/zshrc"
+            install -m 0444 ${./dotfiles/p10k.zsh} "$out/share/nix-base/p10k.zsh"
+          '';
+
           default = pkgs.buildEnv {
             name = "nix-base";
-            paths = map (name: pkgs.${name}) names;
+            paths = map (name: pkgs.${name}) names ++ [ self.packages.${system}.files ];
             pathsToLink = [
-              "/bin" "/share/man" "/share/zsh/site-functions"
+              "/bin" "/libexec" "/share/man" "/share/zsh/site-functions"
               "/share/bash-completion" "/share/fish/vendor_completions.d"
+              "/share/nix-base"
             ];
           };
         });
