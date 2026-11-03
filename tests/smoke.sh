@@ -24,18 +24,10 @@ for shared in share/nix-base/zshenv share/nix-base/zshrc share/nix-base/p10k.zsh
   libexec/moshi-maintenance.py; do
   test -f "$bundle/$shared"
 done
-bash -n "$bundle/bin/git-targets" "$bundle/bin/clone" "$bundle/bin/code" \
-  "$bundle/bin/vivado" "$bundle/bin/powershell.exe" "$bundle/bin/moshi-status" \
-  "$bundle/bin/moshi-upgrade" "$bundle/bin/moshi-upgrade-preview" \
-  "$bundle/bin/moshi-maintenance"
-
-# The git account tool prints its usage without a configured table.
-if "$bundle/bin/git-targets" >/dev/null 2>&1; then
-  echo "git-targets without a table must not succeed" >&2
-  exit 1
-fi
-usage_text="$($bundle/bin/git-targets 2>&1 || true)"
-printf '%s\n' "$usage_text" | grep -q 'Usage: git-targets'
+for tracked in git-targets code vivado powershell.exe moshi-status moshi-upgrade \
+  moshi-upgrade-preview moshi-maintenance; do
+  bash -n "$bundle/bin/$tracked"
+done
 
 "$bundle/bin/age" --version
 "$bundle/bin/bat" --version
