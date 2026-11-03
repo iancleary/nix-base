@@ -1,6 +1,9 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+# Name the failing command instead of failing silently.
+trap 'status=$?; if (( status != 0 )); then printf "smoke: failed (exit %s): %s\n" "$status" "$BASH_COMMAND" >&2; fi' ERR
+
 bundle="${1:?Usage: smoke.sh BUNDLE_PATH}"
 for executable in age bat delta eza fd fzf git git-lfs gum jq lazygit rg shellcheck sops zoxide; do
   test -x "$bundle/bin/$executable"
