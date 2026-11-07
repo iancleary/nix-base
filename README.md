@@ -1,224 +1,196 @@
 # nix-base
 
-A small, reproducible CLI foundation and slow-moving home configuration for
-macOS and Linux.
+A reproducible bundle of stable command-line tools and slow-moving shell
+configuration for macOS and Linux, delivered as a single Nix package.
 
-This repository owns a shared package selection and its `flake.lock`. It exports
-one package bundle: the selected command-line tools, a set of tracked host
-executables, and slow-moving home configuration files. Workstations can install
-the bundle directly. Home Manager and NixOS can install the same bundle through
-minimal adapters. The dotfiles checkout owns the fast-moving and personal
-parts: the git account table, per-account gitconfigs, `$HOME/.config` hooks,
-and host-only settings, plus the deployment that links the bundle's files into
-`$HOME`.
+One `nix profile add` installs the same curated tools, prompt, tmux settings,
+Git defaults, and helper executables on every machine. Home Manager and NixOS
+can install the same bundle through one-line modules. Everything is pinned by
+this repository's `flake.lock`, so each machine runs the exact versions that
+were reviewed here.
 
-## Package selection
+## Quick start
 
-`package-names.nix` is the source of truth:
+Requires Nix with flakes enabled.
+
+```sh
+# Review what is already in your profile.
+nix profile list
+
+# Install a reviewed commit. Replace <commit> with a full Git commit ID or a
+# release tag such as 2026.11.07.00.
+nix profile add 'github:iancleary/nix-base?rev=<commit>'
+```
+
+The bundle lands in your Nix profile. Put the profile `bin/` on `PATH` and link
+the configuration files from `share/nix-base/` into `$HOME` as described in
+[Use the configuration files](#use-the-configuration-files). The bundle never
+writes to `$HOME` on its own.
+
+### Home Manager
+
+```nix
+inputs.nix-base.url = "github:iancleary/nix-base/<commit>";
+
+# In your Home Manager configuration:
+imports = [ inputs.nix-base.homeManagerModules.default ];
+```
+
+The module sets only `home.packages`.
+
+### NixOS
+
+```nix
+inputs.nix-base.url = "github:iancleary/nix-base/<commit>";
+
+# In your NixOS configuration:
+imports = [ inputs.nix-base.nixosModules.default ];
+```
+
+The module sets only `environment.systemPackages`.
+
+Both modules install the bundle built from this repository's own lock. Do not
+set `inputs.nix-base.inputs.nixpkgs.follows`; that would swap in the consumer's
+Nixpkgs and defeat the pinning.
+
+## What you get
+
+### Command-line tools
+
+The selection lives in `package-names.nix`:
 
 ```text
 age bat delta eza fd fzf git git-lfs gum jq lazygit ripgrep shellcheck sops zoxide zsh-powerlevel10k
 ```
 
-These are stable command-line tools plus the Powerlevel10k prompt theme, which
-the bundle's `zshrc` sources from `share/zsh-powerlevel10k`. Update the
-selection deliberately. Keep
-developer package managers, language runtimes, and fast-moving tools in mise.
+Each tool ships with its manual pages and shell completions. The bundle
+deliberately excludes language runtimes, developer package managers, fonts, and
+fast-moving tools. Use mise or your OS package manager for those.
+
+### Helper executables
+
+Scripts tracked in `bin/` are installed next to the tools:
+
+| Executable | Purpose |
+| --- | --- |
+| `git-targets` | Multi-account Git helper. `list`, `clone <key> <repo>`, `login`, `status`, and `migrate` route repositories to the right identity using a TSV table you supply. |
+| `moshi-status`, `moshi-upgrade`, `moshi-upgrade-preview`, `moshi-maintenance` | Status and upgrade commands for the Moshi Homebrew formula, backed by `libexec/moshi-maintenance.py`. |
+| `code`, `code.exe` | Launch VS Code from macOS or from WSL. |
+| `vivado`, `vivado.exe` | Launch Vivado from WSL. |
+| `powershell`, `powershell.exe` | Launch PowerShell from WSL. |
+
+Configuration for these executables is through environment variables:
+
+| Variable | Effect |
+| --- | --- |
+| `GIT_TARGETS_TABLE` | Path to the account table. Defaults to `$XDG_CONFIG_HOME/git-targets/targets.tsv`. Columns: `key`, `directory`, `host`, `username`, `email`, `login`, `gitconfig`, `credential`, `tool`. Gitconfig paths resolve relative to the table. |
+| `MOSHI_BREWFILE` | Read the Moshi tap and formula from a marked Brewfile instead of the upstream `rjyo/moshi` defaults. |
+| `MACOS_VSCODE_LAUNCHER`, `WSL_VSCODE_LAUNCHER`, `VIVADO_LAUNCHER` | Override the program each launcher executes. |
+
+The account table, credentials, and any identity data live outside this
+repository. Nothing in the bundle contains them.
+
+### Configuration files
+
+`share/nix-base/` holds startup files that change rarely:
+
+| File | Contents |
+| --- | --- |
+| `zshenv` | Environment for login and non-interactive Zsh. |
+| `zshrc` | Interactive Zsh setup: completions, Powerlevel10k, zoxide, fzf, and the worktree helpers. |
+| `p10k.zsh` | Powerlevel10k prompt configuration. |
+| `tmux.conf` | Shared tmux settings. |
+| `worktrees.sh` | `ga` and `gd`, helpers that create and remove Git worktrees. Sourceable from Bash or Zsh. `gd` confirms through `gum`. |
+| `gitconfig` | Public Git defaults: `merge.conflictStyle`, delta as pager and diff filter, and delta options. No identity. |
+
+## Use the configuration files
+
+Link or include the bundled files from your own dotfiles. The installed path
+looks like
+`~/.local/state/nix/profiles/profile/share/nix-base/<file>`.
+
+| Bundled file | Typical wiring |
+| --- | --- |
+| `zshenv`, `zshrc` | Symlink `~/.zshenv` and `~/.zshrc` to them, or source them from your own files. |
+| `p10k.zsh` | Nothing to do. `zshrc` sources it unless `~/.p10k.zsh` exists, which takes precedence. |
+| `tmux.conf` | Add `source-file <path>` to `~/.config/tmux/tmux.conf`. |
+| `gitconfig` | Add `[include] path = <path>` to `~/.gitconfig`, then keep your name, email, and credential settings in `~/.gitconfig`. |
+
+Machine-specific and personal settings go in files the bundle looks for but
+does not ship:
+
+| Hook | Sourced by |
+| --- | --- |
+| `~/.config/dotfiles/local.zshenv` | `zshenv`, for environment on every shell |
+| `~/.config/dotfiles/login.sh` | `zshenv`, for login setup such as activating mise |
+| `~/.config/dotfiles/local.zsh` | `zshrc`, for interactive extras and host-only aliases |
+| `~/.p10k.zsh` | `zshrc`, to replace the bundled prompt configuration |
+| `~/.config/tmux/local.conf` | `tmux.conf`, for host-only tmux settings |
+
+Missing hooks are skipped silently.
 
 ## Supported platforms
 
 | Nix system | Machines |
 | --- | --- |
 | `aarch64-darwin` | Apple silicon Macs |
-| `x86_64-linux` | Linux development machines |
-| `aarch64-linux` | ARM64 Linux machines, including DGX Spark |
+| `x86_64-linux` | x86-64 Linux |
+| `aarch64-linux` | ARM64 Linux, including DGX Spark |
 
-The bundle includes executables, manual pages, shell completions, tracked host
-executables, and the home configuration described below. Dotfiles own the
-activation of completions and the deployment of the configuration files.
+## Updating and rolling back
 
-## Bundle contents
-
-The default package is one `buildEnv` containing:
-
-- `bin/`: the tools from `package-names.nix`, plus the tracked executables
-  from this repository:
-  - `git-targets`: the git account tool. It reads an account table
-    (`key`, `directory`, `host`, `username`, `email`, `login`, `gitconfig`,
-    `credential`, `tool`) from `$GIT_TARGETS_TABLE` or
-    `$XDG_CONFIG_HOME/git-targets/targets.tsv`, and resolves the gitconfig
-    files named by the table relative to the table's own directory. It provides
-    `list`, `clone`, `login`, `status`, and `migrate`. Invoked as `clone`, it
-    keeps the historical `clone <key> <repo>` form. The table and the
-    gitconfigs live in the dotfiles checkout, which deploys the table to
-    `~/.config/git-targets/targets.tsv`.
-  - `moshi-status`, `moshi-upgrade`, `moshi-upgrade-preview`, and
-    `moshi-maintenance`: the Moshi maintenance interface backed by
-    `libexec/moshi-maintenance.py`. The procedure defaults to the upstream
-    `rjyo/moshi` tap and `moshi-hook` formula; set `MOSHI_BREWFILE` to read
-    them from a marked Brewfile instead.
-  - `code` (macOS and Windows-VS-Code-under-WSL), `vivado` and
-    `powershell.exe` (WSL): host launchers with environment-variable overrides
-    (`MACOS_VSCODE_LAUNCHER`, `WSL_VSCODE_LAUNCHER`, `VIVADO_LAUNCHER`).
-    `code.exe`, `powershell`, and `vivado.exe` alias the same scripts.
-- `libexec/`: support programs used by the `bin/` executables.
-- `share/nix-base/`: the home configuration files:
-  - `zshenv`: login and non-interactive Zsh environment. It sources
-    `$HOME/.config/dotfiles/local.zshenv` and `login.sh`, which dotfiles owns.
-  - `zshrc`: interactive Zsh configuration. It sources
-    `$HOME/.config/dotfiles/local.zsh`, which dotfiles owns. It does not source
-    the dotfiles-owned `$HOME/.config/shell` helpers; the dotfiles checkout's
-    own startup wrapper adds them.
-  - `p10k.zsh`: the Powerlevel10k prompt configuration. The bundle `zshrc`
-    sources it unless a host `~/.p10k.zsh` exists.
-  - `tmux.conf`: the shared tmux settings. Dotfiles link `~/.config/tmux/tmux.conf`
-    to a forwarder that sources this file. It sources the dotfiles-owned
-    `~/.config/tmux/local.conf` for host-only settings.
-  - `worktrees.sh`: the `ga` and `gd` Git worktree helpers, sourceable in Bash
-    and Zsh. The bundle's `zshrc` sources it from the same directory. `gd`
-    confirms through `gum` from this bundle.
-  - `gitconfig`: public Git settings (`merge.conflictStyle`, the delta pager
-    and diff filter, delta options). The dotfiles `~/.gitconfig` includes it;
-    identity, directory includes, and credential routing stay there.
-
-These files carry no identity, table, or secret content. The dotfiles checkout
-links them into `$HOME` from the installed profile path, for example
-`~/.local/state/nix/profiles/profile/share/nix-base/zshrc`.
-
-## Ownership
-
-| Repository or tool | Responsibility |
-| --- | --- |
-| `nix-base` | Stable CLI packages and their dependency lock; the Powerlevel10k theme; slow-moving home configuration, public Git settings, tmux settings, worktree helpers, and host launchers; the generic git account tool |
-| `dotfiles` | Editable shell, Git, terminal, and editor configuration; the git account table and per-account gitconfigs; deployment into `$HOME` |
-| mise | Developer package managers, runtimes, and frequently updated tools |
-| Native package manager | OS packages, desktop applications, and services |
-| `nix-fleet` | NixOS appliances, host services, and fleet operations |
-
-This repository contains no fonts, font inputs, git account tables, per-account
-gitconfigs, credentials, host identities, or secrets. Berkeley Mono is private and
-must remain outside this repository and its Git history.
-
-## Install the bundle
-
-Use an existing Nix installation with flakes enabled. Inventory the current
-owners of these tools first. Resolve duplicate packages before installing the
-bundle. Do not replace an existing profile without reviewing its contents.
-
-Inspect the current profile:
+Pin a specific commit or release tag and move it deliberately. A pinned
+install never changes on its own. To update, remove the old entry and add the
+new revision:
 
 ```sh
-nix profile list
+nix profile remove nix-base
+nix profile add 'github:iancleary/nix-base?rev=<new-commit>'
 ```
 
-Choose a reviewed commit. Replace `<commit>` below with its full Git commit ID:
-
-```sh
-nix profile add 'github:iancleary/nix-base?rev=<commit>'
-```
-
-The dotfiles checkout exposes the Nix user profile on `PATH` and links the
-bundle's home configuration into `$HOME`. This repository does not install
-itself into `$HOME`.
-
-## Home Manager and NixOS
-
-Add the base as a pinned flake input:
-
-```nix
-inputs.nix-base.url = "github:iancleary/nix-base/<commit>";
-```
-
-For Home Manager, import:
-
-```nix
-imports = [ inputs.nix-base.homeManagerModules.default ];
-```
-
-For NixOS, import:
-
-```nix
-imports = [ inputs.nix-base.nixosModules.default ];
-```
-
-The Home Manager adapter sets only `home.packages`. The NixOS adapter sets only
-`environment.systemPackages`. Both use the bundle built from this repository's
-locked package set. They do not use the consumer's package versions.
-
-Do not set `inputs.nix-base.inputs.nixpkgs.follows`. That would replace the
-base's dependency selection with the consumer's selection.
-
-## Update and rollback
-
-Package updates require a reviewed `flake.lock` change. Package selection
-changes require a reviewed `package-names.nix` change. Build and check an update
-on all supported platforms before promoting it.
-
-The flake uses FlakeHub's public `NixOS/nixpkgs/0.2605` stream. The lockfile
-records the exact Nixpkgs revision selected from that stream.
-
-Consumers update their pinned base commit explicitly. A dotfiles pull does not
-update this bundle. A mise installation does not update this bundle.
-
-Keep the previous profile generation until the new tools pass local checks.
-Direct profile users can return to it with:
+Return to the previous generation if something breaks:
 
 ```sh
 nix profile rollback
 ```
 
-Home Manager and NixOS users use their normal generation rollback workflow.
-This repository does not migrate machines or replace existing configurations.
+Home Manager and NixOS users roll back through their normal generation tools.
+
+The flake tracks the FlakeHub `NixOS/nixpkgs/0.2605` stream. `flake.lock`
+records the exact Nixpkgs revision. Tool upgrades are `flake.lock` changes and
+selection changes are `package-names.nix` changes, both reviewed through pull
+requests and verified on all three platforms before release.
 
 ## Development
 
-Required tools are Nix with flakes enabled and Python 3.9 or later. `just`
-is optional and can be installed through mise.
+Requires Nix with flakes enabled and Python 3.9 or later. `just` is optional.
 
 ```sh
-bash scripts/check.sh
-nix build .
+bash scripts/check.sh   # or: just check
+nix build .             # or: just build
 ```
 
-Equivalent wrappers are `just check` and `just build`.
+`scripts/check.sh` audits tracked files and staged blobs for fonts and stray
+dependencies, then runs `nix flake check --all-systems --no-build`. Stage new
+files before running it. CI runs the same audit, package builds, flake checks,
+and adapter contract tests natively on all three platforms.
 
-The check script audits tracked working files and staged blobs for font assets
-and extra dependencies. Stage new files before running it. It then
-runs `nix flake check --no-write-lock-file --all-systems --no-build` to evaluate
-all supported systems. A separate build selects the local system's checks.
-CI checks only the base source audit, packages, flake, and adapter contracts
-on the three native platforms. Release-tool tests run locally through
-`release.toml`.
-
-Checks cover the bundle, executable smoke tests, ownership rules, and the
-minimal adapter contracts. Keep these checks aligned with the public outputs.
-
-### CI network retries
-
-[The native CI workflow](.github/workflows/check.yml) configures Nix's built-in
-download retries through the installer action's `extra-conf`. Transient fetch
-and binary-cache download failures get up to 10 attempts per download, with
-Nix's backoff between attempts. Connections time out after 15 seconds; downloads
-with no progress time out after 60 seconds so Nix can retry instead of hanging.
-See [Nix's configuration reference](https://nix.dev/manual/nix/stable/command-ref/conf-file.html#conf-download-attempts).
-
-Retries apply to Nix downloads, not the entire check script. Source audit,
-evaluation, build, and smoke-test errors still fail CI. These settings take
-effect after Nix installation; they do not control checkout, action downloads,
-or the installer itself. Persistent network failures still fail after the
-retry budget or the job's 30-minute timeout. If retries are exhausted, inspect
-the failed URL and HTTP or connection error in the job log before rerunning;
-do not change `flake.lock` or bypass checks to work around an outage.
+[The CI workflow](.github/workflows/check.yml) configures Nix download retries
+through the installer's `extra-conf`: up to 10 attempts per download, a 15
+second connect timeout, and a 60 second stalled-download timeout. These cover
+Nix fetches only. If retries are exhausted, read the failing URL in the job log
+and rerun; do not edit `flake.lock` or skip checks to route around an outage.
 
 ## Releases
 
-Releases use `YYYY.MM.DD.XX`, starting with `.00` each day in
-`America/Phoenix`. They tag a verified commit and publish GitHub notes. They do
-not change the package selection, lockfile, or a version file.
+Releases are tags of the form `YYYY.MM.DD.XX`, starting at `.00` each day in
+`America/Phoenix`. A release tags a verified `main` commit and publishes GitHub
+release notes; it does not change the package selection or the lockfile.
 
-Release tooling needs Python 3.11 or later and uv from mise or a native
-package manager. Use the repo-local runner. See [the release process](docs/release.md) for checks,
-guarded dry runs, publication, and recovery.
+Release tooling needs Python 3.11 or later and uv. The recipes are
+`just release-check`, `just release-plan`, `just release-dry-run`, and
+`just cut-release`. See [docs/release.md](docs/release.md) for the full
+process, guards, and recovery steps.
 
 ## License
 
