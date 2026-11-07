@@ -69,6 +69,12 @@ The default package is one `buildEnv` containing:
     own startup wrapper adds them.
   - `p10k.zsh`: the Powerlevel10k prompt configuration deployed as
     `~/.p10k.zsh`.
+  - `tmux.conf`: the shared tmux settings. Dotfiles link `~/.config/tmux/tmux.conf`
+    to a forwarder that sources this file. It sources the dotfiles-owned
+    `~/.config/tmux/local.conf` for host-only settings.
+  - `worktrees.sh`: the `ga` and `gd` Git worktree helpers, sourceable in Bash
+    and Zsh. The bundle's `zshrc` sources it from the same directory. `gd`
+    confirms through `gum` from this bundle.
 
 These files carry no identity, table, or secret content. The dotfiles checkout
 links them into `$HOME` from the installed profile path, for example
@@ -78,7 +84,7 @@ links them into `$HOME` from the installed profile path, for example
 
 | Repository or tool | Responsibility |
 | --- | --- |
-| `nix-base` | Stable CLI packages and their dependency lock; slow-moving home configuration and host launchers; the generic git account tool |
+| `nix-base` | Stable CLI packages and their dependency lock; slow-moving home configuration, tmux settings, worktree helpers, and host launchers; the generic git account tool |
 | `dotfiles` | Editable shell, Git, terminal, and editor configuration; the git account table and per-account gitconfigs; deployment into `$HOME` |
 | mise | Developer package managers, runtimes, and frequently updated tools |
 | Native package manager | OS packages, desktop applications, and services |
