@@ -23,7 +23,6 @@ fi
 path=("$HOME/.local/bin" "${MISE_DATA_DIR:-${XDG_DATA_HOME:-$HOME/.local/share}/mise}/shims" "$HOME/.cargo/bin" "$HOME/go/bin" "$HOME/.local/share/npm/bin" $path)
 
 export NPM_CONFIG_PREFIX="${NPM_CONFIG_PREFIX:-$HOME/.local/share/npm}"
-export DELTA_FEATURES="${DELTA_FEATURES:-+side-by-side}"
 
 [[ ! -r "$HOME/.cargo/env" ]] || source "$HOME/.cargo/env" >/dev/null 2>&1
 [[ ! -r "$HOME/.config/dotfiles/local.zshenv" ]] || source "$HOME/.config/dotfiles/local.zshenv"

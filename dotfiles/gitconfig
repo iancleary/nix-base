@@ -10,6 +10,8 @@
 [interactive]
     diffFilter = delta --color-only
 
+# delta reads this section on every run, including outside git, so the
+# features list is declared here and not as DELTA_FEATURES in the shell.
 [delta]
     navigate = true
     features = +side-by-side
