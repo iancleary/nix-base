@@ -16,8 +16,9 @@
   identity, and secrets in the dotfiles checkout. `bin/git-targets` reads them
   from a table outside this repository; never embed one here.
 - Keep fast-moving shell configuration in the dotfiles checkout. This
-  repository owns the slow-moving startup files, prompt config, tmux
-  settings, Git worktree helpers, and host launchers; `$HOME/.config` hooks
+  repository owns the slow-moving startup files, the Powerlevel10k theme and
+  prompt config, public Git settings, tmux settings, Git worktree helpers, and
+  host launchers; `$HOME/.config` hooks
   and host-only settings stay in dotfiles.
 - Do not add language runtimes or developer package managers. mise owns them.
 - Do not add fonts or font inputs. Never add Berkeley Mono assets to Git.

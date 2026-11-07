@@ -17,10 +17,12 @@ and host-only settings, plus the deployment that links the bundle's files into
 `package-names.nix` is the source of truth:
 
 ```text
-age bat delta eza fd fzf git git-lfs gum jq lazygit ripgrep shellcheck sops zoxide
+age bat delta eza fd fzf git git-lfs gum jq lazygit ripgrep shellcheck sops zoxide zsh-powerlevel10k
 ```
 
-These are stable command-line tools. Update the selection deliberately. Keep
+These are stable command-line tools plus the Powerlevel10k prompt theme, which
+the bundle's `zshrc` sources from `share/zsh-powerlevel10k`. Update the
+selection deliberately. Keep
 developer package managers, language runtimes, and fast-moving tools in mise.
 
 ## Supported platforms
@@ -67,14 +69,17 @@ The default package is one `buildEnv` containing:
     `$HOME/.config/dotfiles/local.zsh`, which dotfiles owns. It does not source
     the dotfiles-owned `$HOME/.config/shell` helpers; the dotfiles checkout's
     own startup wrapper adds them.
-  - `p10k.zsh`: the Powerlevel10k prompt configuration deployed as
-    `~/.p10k.zsh`.
+  - `p10k.zsh`: the Powerlevel10k prompt configuration. The bundle `zshrc`
+    sources it unless a host `~/.p10k.zsh` exists.
   - `tmux.conf`: the shared tmux settings. Dotfiles link `~/.config/tmux/tmux.conf`
     to a forwarder that sources this file. It sources the dotfiles-owned
     `~/.config/tmux/local.conf` for host-only settings.
   - `worktrees.sh`: the `ga` and `gd` Git worktree helpers, sourceable in Bash
     and Zsh. The bundle's `zshrc` sources it from the same directory. `gd`
     confirms through `gum` from this bundle.
+  - `gitconfig`: public Git settings (`merge.conflictStyle`, the delta pager
+    and diff filter, delta options). The dotfiles `~/.gitconfig` includes it;
+    identity, directory includes, and credential routing stay there.
 
 These files carry no identity, table, or secret content. The dotfiles checkout
 links them into `$HOME` from the installed profile path, for example
@@ -84,7 +89,7 @@ links them into `$HOME` from the installed profile path, for example
 
 | Repository or tool | Responsibility |
 | --- | --- |
-| `nix-base` | Stable CLI packages and their dependency lock; slow-moving home configuration, tmux settings, worktree helpers, and host launchers; the generic git account tool |
+| `nix-base` | Stable CLI packages and their dependency lock; the Powerlevel10k theme; slow-moving home configuration, public Git settings, tmux settings, worktree helpers, and host launchers; the generic git account tool |
 | `dotfiles` | Editable shell, Git, terminal, and editor configuration; the git account table and per-account gitconfigs; deployment into `$HOME` |
 | mise | Developer package managers, runtimes, and frequently updated tools |
 | Native package manager | OS packages, desktop applications, and services |
