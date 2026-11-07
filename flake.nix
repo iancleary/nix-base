@@ -41,6 +41,8 @@
             install -m 0444 ${./dotfiles/zshenv} "$out/share/nix-base/zshenv"
             install -m 0444 ${./dotfiles/zshrc} "$out/share/nix-base/zshrc"
             install -m 0444 ${./dotfiles/p10k.zsh} "$out/share/nix-base/p10k.zsh"
+            install -m 0444 ${./dotfiles/tmux.conf} "$out/share/nix-base/tmux.conf"
+            install -m 0444 ${./dotfiles/worktrees.sh} "$out/share/nix-base/worktrees.sh"
           '';
 
           default = pkgs.buildEnv {
