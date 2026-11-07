@@ -4,6 +4,11 @@
 # checkout's own Zsh startup wrapper.
 [[ -o interactive ]] || return
 
+# This file is sourced from the installed profile's share/nix-base. Keep the
+# unresolved path so sibling share directories of the profile stay visible.
+_nix_base_share="${${(%):-%x}:h}"
+_nix_base_root="${_nix_base_share:h:h}"
+
 # Load Powerlevel10k instant prompt before the remaining interactive setup.
 if [[ -r "${XDG_CACHE_HOME:-$HOME/.cache}/p10k-instant-prompt-${(%):-%n}.zsh" ]]; then
   source "${XDG_CACHE_HOME:-$HOME/.cache}/p10k-instant-prompt-${(%):-%n}.zsh"
@@ -68,25 +73,30 @@ if (( $+commands[herdr] )); then
   eval "$(herdr completion zsh)"
 fi
 
-# Source a native Powerlevel10k installation when available. Homebrew uses the
-# first path, the Arch package the second, and Debian bootstrap the third.
-# The Nerd Font is installed in the terminal. This repository contains no font files.
+# Source Powerlevel10k from this bundle. The native paths remain as fallbacks
+# for a host that still carries the Homebrew, Arch, or Debian installation.
+# A host ~/.p10k.zsh overrides the bundled prompt configuration. The Nerd
+# Font is installed in the terminal. This repository contains no font files.
 for _p10k_theme in \
+  "$_nix_base_root/share/zsh-powerlevel10k/powerlevel10k.zsh-theme" \
   /opt/homebrew/share/powerlevel10k/powerlevel10k.zsh-theme \
   /usr/share/zsh-theme-powerlevel10k/powerlevel10k.zsh-theme \
   /usr/share/powerlevel10k/powerlevel10k.zsh-theme; do
   if [[ -r "$_p10k_theme" ]]; then
     source "$_p10k_theme"
-    [[ ! -r "$HOME/.p10k.zsh" ]] || source "$HOME/.p10k.zsh"
+    if [[ -r "$HOME/.p10k.zsh" ]]; then
+      source "$HOME/.p10k.zsh"
+    elif [[ -r "$_nix_base_share/p10k.zsh" ]]; then
+      source "$_nix_base_share/p10k.zsh"
+    fi
     break
   fi
 done
 unset _p10k_theme
 
 # Source the worktree helpers from this file's own directory in the bundle.
-_nix_base_share="${${(%):-%x}:A:h}"
 [[ ! -r "$_nix_base_share/worktrees.sh" ]] || source "$_nix_base_share/worktrees.sh"
-unset _nix_base_share
+unset _nix_base_share _nix_base_root
 
 [[ ! -r "$HOME/.config/dotfiles/local.zsh" ]] || source "$HOME/.config/dotfiles/local.zsh"
 

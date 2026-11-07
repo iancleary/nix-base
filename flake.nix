@@ -43,6 +43,7 @@
             install -m 0444 ${./dotfiles/p10k.zsh} "$out/share/nix-base/p10k.zsh"
             install -m 0444 ${./dotfiles/tmux.conf} "$out/share/nix-base/tmux.conf"
             install -m 0444 ${./dotfiles/worktrees.sh} "$out/share/nix-base/worktrees.sh"
+            install -m 0444 ${./dotfiles/gitconfig} "$out/share/nix-base/gitconfig"
           '';
 
           default = pkgs.buildEnv {
@@ -51,7 +52,7 @@
             pathsToLink = [
               "/bin" "/libexec" "/share/man" "/share/zsh/site-functions"
               "/share/bash-completion" "/share/fish/vendor_completions.d"
-              "/share/nix-base"
+              "/share/nix-base" "/share/zsh-powerlevel10k"
             ];
           };
         });

@@ -21,7 +21,8 @@ test -L "$bundle/bin/vivado.exe" && test "$bundle/bin/vivado.exe" -ef "$bundle/b
 
 # Home configuration and the bundled maintenance procedure ride along.
 for shared in share/nix-base/zshenv share/nix-base/zshrc share/nix-base/p10k.zsh \
-  share/nix-base/tmux.conf share/nix-base/worktrees.sh libexec/moshi-maintenance.py; do
+  share/nix-base/tmux.conf share/nix-base/worktrees.sh share/nix-base/gitconfig \
+  share/zsh-powerlevel10k/powerlevel10k.zsh-theme libexec/moshi-maintenance.py; do
   test -f "$bundle/$shared"
 done
 for tracked in git-targets code vivado powershell.exe moshi-status moshi-upgrade \

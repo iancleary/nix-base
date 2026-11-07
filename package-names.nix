@@ -15,4 +15,5 @@
   "shellcheck"
   "sops"
   "zoxide"
+  "zsh-powerlevel10k"
 ]
