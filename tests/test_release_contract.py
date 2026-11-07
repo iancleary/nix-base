@@ -83,7 +83,9 @@ class ReleaseContractTests(unittest.TestCase):
 
     def assert_rejected(self, result, message):
         self.assertNotEqual(result.returncode, 0, result.stdout)
-        self.assertIn(message, result.stdout + result.stderr)
+        messages = (message,) if isinstance(message, str) else tuple(message)
+        output = result.stdout + result.stderr
+        self.assertTrue(any(m in output for m in messages), f"{messages!r} not found in {output!r}")
         self.assertNotIn("release create", self.gh_calls.read_text())
 
     def test_tag_only_plan_accepts_calver_and_captures_exact_guards(self):
@@ -105,7 +107,10 @@ class ReleaseContractTests(unittest.TestCase):
             args = ("--apply",) if action == "run" else ()
             result = self.runner(action, "--version", "2026.02.29.00", *args)
             with self.subTest(action=action):
-                self.assert_rejected(result, "day is out of range for month")
+                self.assert_rejected(result, (
+                    "day is out of range for month",  # CPython < 3.13
+                    "day 29 must be in range 1..28 for month 2",  # CPython >= 3.13
+                ))
                 self.assertEqual(self.snapshot(), before)
                 self.assertEqual(self.gh_calls.read_text(), "")
 
